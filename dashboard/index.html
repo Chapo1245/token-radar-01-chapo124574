@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Token Radar — which pre-token protocol is worth farming next</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header class="top">
+  <div>
+    <h1>TOKEN RADAR</h1>
+    <p class="tag">Every protocol that records no token, ranked by what its launch would be worth — and how to farm it.</p>
+  </div>
+  <div class="meta" id="meta"></div>
+</header>
+
+<section class="method">
+  <h2>How the ranking works</h2>
+  <p><strong>Implied value = 8 × TVL<sup>0.85</sup> × growth × maturity.</strong>
+  <span id="formula"></span>
+  The model reads only the snapshot's own figures — TVL, 7-day change, years listed
+  with no token — never a list of names. A protocol "records no token" when DefiLlama
+  carries no token for it; that is the record, not proof it has none. Implied values
+  are this board's own claim, never a prediction that a token will launch.</p>
+</section>
+
+<section class="controls">
+  <input id="q" type="search" placeholder="Search name or slug…" aria-label="Search protocols">
+  <select id="cat" aria-label="Filter by category"><option value="">All categories</option></select>
+  <select id="chain" aria-label="Filter by chain"><option value="">All chains</option></select>
+  <select id="sort" aria-label="Sort board">
+    <option value="rank">Sort: implied value</option>
+    <option value="tvl">Sort: TVL</option>
+    <option value="growth">Sort: 7-day growth</option>
+    <option value="age">Sort: oldest listed</option>
+  </select>
+  <label class="check"><input id="watch" type="checkbox"> Watchlist only</label>
+  <span id="count" class="count"></span>
+</section>
+
+<main class="layout">
+  <div class="board-wrap">
+    <table id="board">
+      <colgroup><col style="width:4%"><col style="width:23%"><col style="width:15%"><col style="width:16%"><col style="width:10%"><col style="width:8%"><col style="width:7%"><col style="width:17%"></colgroup>
+      <thead><tr>
+        <th data-k="rank">#</th><th data-k="name">Protocol</th><th data-k="category">Category</th>
+        <th data-k="chains">Chains</th><th data-k="tvl">TVL</th><th data-k="growth">7d</th>
+        <th data-k="age">Age</th><th data-k="value">Implied value</th>
+      </tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <p class="hint">Click any row for its detail view and farm plan.</p>
+  </div>
+  <aside class="detail" id="detail" aria-live="polite">
+    <p class="empty">Select a protocol to see its value breakdown and farm plan.</p>
+  </aside>
+</main>
+
+<section class="refs">
+  <div>
+    <h2>Already launched — not a launch bet</h2>
+    <p>These protocols record a token that already trades, so they are not ranked here. Shown by market cap for reference.</p>
+    <ul id="launched"></ul>
+  </div>
+  <div>
+    <h2>Records no token, but not a launch</h2>
+    <p>Exchanges, bridges and wrapped or staked products record no token of their own, yet are not a protocol waiting on a launch. Largest ones, with the reason each is set aside:</p>
+    <ul id="excluded"></ul>
+  </div>
+</section>
+
+<footer>
+  <p>Token Radar · snapshot <span id="asof"></span> · watchlist floor $50M · 198 launch candidates from 758 protocols.
+  Farm plans are guidance, not financial advice; never share a seed phrase and never approve unlimited spending.</p>
+</footer>
+<script src="../data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
