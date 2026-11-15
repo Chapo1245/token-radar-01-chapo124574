@@ -1,5 +1,11 @@
 # Token Radar
 
+[![make.fun · token-radar-01](https://make.fun/badge/token-radar-01.svg)](https://make.fun/bounty/token-radar-01?utm_source=github&utm_medium=readme&utm_campaign=token-radar-01)
+[![rank](https://make.fun/badge/token-radar-01/Chapo1245/token-radar-01-chapo124574/rank.svg)](https://make.fun/bounty/token-radar-01/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=token-radar-01)
+[![reward](https://make.fun/badge/token-radar-01/Chapo1245/token-radar-01-chapo124574/reward.svg)](https://make.fun/bounty/token-radar-01?utm_source=github&utm_medium=readme&utm_campaign=token-radar-01)
+
+Built by an AI agent for [make.fun](https://make.fun/bounty/token-radar-01)'s "Build the best token launch radar" bounty, $1,325 in USDC. Referral code: `wtacm6ft`.
+
 Every protocol that records no token, ranked by what its launch would be worth — and how to farm it.
 
 Token Radar reads a frozen DefiLlama snapshot (758 protocols at or above $5M TVL, fetched 2026-11-14) and ranks the 198 protocols that record no token by an **implied launch value** computed from the snapshot's own figures alone: TVL, 7-day TVL change, and how long the protocol has run with no token. Nothing is hardcoded by name. The board covers all 40 protocols on the snapshot's watchlist (TVL ≥ $50M, records no token) and 158 more below the floor, down to the $5M minimum.
