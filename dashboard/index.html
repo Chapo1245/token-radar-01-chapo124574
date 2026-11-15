@@ -17,7 +17,7 @@
 
 <section class="method">
   <h2>How the ranking works</h2>
-  <p><strong>Implied value = 8 × TVL<sup>0.85</sup> × growth × maturity.</strong>
+  <p><strong>Implied value = 20 × TVL<sup>0.80</sup> × exp(0.010 × clamp(7-day change, −50, 100)) × (1 + 0.35 × min(years listed, 5)).</strong>
   <span id="formula"></span>
   The model reads only the snapshot's own figures — TVL, 7-day change, years listed
   with no token — never a list of names. A protocol "records no token" when DefiLlama

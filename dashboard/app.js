@@ -25,9 +25,9 @@
     '<b>' + D.counts.watchlist + '</b> on the watchlist · floor $50M<br>' +
     'snapshot ' + D.as_of + ' · ' + D.counts.protocols + ' protocols tracked';
   $('asof').textContent = D.as_of;
-  $('formula').textContent = 'Growth is 1 + 0.006 × the 7-day TVL change (clamped −50%…+100%); ' +
-    'maturity is 1 + 0.15 × years listed, capped at 5 years. TVL is dampened to the power 0.85 ' +
-    'so size leads without burying smaller fast movers. ';
+  $('formula').textContent = 'Growth compounds: exp(0.010 × the 7-day TVL change, clamped −50…+100), ' +
+    'so a fast grower compounds upward and a shrinker decays. Maturity is 1 + 0.35 × years listed, ' +
+    'capped at 5 years. TVL is dampened to the power 0.80 so size leads without burying smaller fast movers. ';
 
   // Fill filter selects from the data itself.
   var cats = [], chains = [];
