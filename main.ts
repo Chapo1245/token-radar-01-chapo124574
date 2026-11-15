@@ -11,6 +11,8 @@
 //
 // Usage (from the repo root):
 //   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts --input ../input/snapshot.json
+// With no --input the entry reads $MAKEFUN_INPUT_DIR/snapshot.json
+// (the grader mounts the competition input at /input and runs `node main.ts`).
 //
 // The run is deterministic: fixed key order, a total sort (implied value,
 // then slug), no clock, no randomness, no network. Two runs write the same
@@ -44,7 +46,9 @@ function parseArgs(argv: string[]): { inputPath: string; outputDir: string } {
     if (argv[i] === '--input' && i + 1 < argv.length) inputPath = argv[++i] as string;
     else if (argv[i]?.startsWith('--input=')) inputPath = (argv[i] as string).slice('--input='.length);
   }
-  if (!inputPath) usageFail('missing --input <snapshot.json>');
+  // The grader runs `node main.ts` with no arguments: default to the
+  // competition snapshot inside MAKEFUN_INPUT_DIR (mounted at /input).
+  if (!inputPath) inputPath = join(process.env.MAKEFUN_INPUT_DIR ?? '/input', 'snapshot.json');
   const outputDir = process.env.MAKEFUN_OUTPUT_DIR ?? 'out';
   return { inputPath, outputDir };
 }
