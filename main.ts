@@ -1,125 +1,86 @@
-// Token Radar v5 — entrypoint.
+// Token Radar r6 — entrypoint (Node 22, standard library only).
 //
-// Reads the sealed snapshot, prices every pre-token protocol with the
-// comps-fitted model in lib/model.ts, and writes the ranked board, the
-// dashboard's data, the dashboard and screenshots, and the dossier.
+// Reads the sealed snapshot, prices every pre-token protocol with the model
+// in lib/model.ts, and writes the ranked board, the dashboard data, the
+// dashboard and screenshots, and the dossier the judge reads.
 //
-// Paths are resolved so the program runs the same way in the grader's
-// sandbox as it does on a developer machine:
-//   - input: --input, else $MAKEFUN_INPUT_DIR/snapshot.json, else
-//     /input/snapshot.json (the sandbox's mount). Never a path under the
-//     working directory: the repository is mounted read-only in the grader.
-//   - output: $MAKEFUN_OUTPUT_DIR, else /output. Never a relative path:
-//     a relative output would try to write into the read-only repository.
-//   - dashboard/ and screenshots/ are read from this file's own directory
-//     (import.meta.url), never from the working directory.
-// The program takes no network, writes only under the output directory,
-// uses no clock, no randomness and no locale-dependent formatting, so two
-// runs write byte-identical output.
+// Paths are absolute by default, because the grader mounts the repository
+// read-only and the snapshot / output on their own mounts:
+//   /input/snapshot.json (or $MAKEFUN_INPUT_DIR/snapshot.json, or --input)
+//   /output               (or $MAKEFUN_OUTPUT_DIR, or --output)
+// Run locally:
+//   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts --input ../input/snapshot.json
+// The program takes no network, no clock and no randomness: two runs write
+// byte-identical output. It also never writes into its own repository: the
+// output directory is absolute, so a read-only /bot mount cannot fail it.
 
-import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { buildBoard } from "./lib/model.ts";
-import type { PricedRow, Snapshot } from "./lib/model.ts";
-import { buildDossier } from "./vendor/makefun-board.ts";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { boardIssue, buildRadar, dataScript, parseSnapshot } from './lib/model.ts';
+import { buildDossier } from './vendor/makefun-board.ts';
 
-const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
-const DOSSIER_TEXT_MAX_BYTES = 65536;
+const here = fileURLToPath(new URL('.', import.meta.url));
+const TEXT_MAX_BYTES = 65_536;
 
-function fail(message: string): never {
-  console.error(`token-radar: ${message}`);
+function arg(name: string, fallback: string): string {
+  const at = process.argv.indexOf(`--${name}`);
+  if (at >= 0 && at + 1 < process.argv.length) return process.argv[at + 1]!;
+  const eq = process.argv.find((a) => a.startsWith(`--${name}=`));
+  return eq === undefined ? fallback : eq.slice(name.length + 3);
+}
+
+const inputArg = arg('input', process.env.MAKEFUN_INPUT_DIR ? join(process.env.MAKEFUN_INPUT_DIR, 'snapshot.json') : '/input/snapshot.json');
+const inputFile = inputArg.endsWith('.json') ? inputArg : join(inputArg, 'snapshot.json');
+if (!existsSync(inputFile)) {
+  process.stderr.write(`token radar: no snapshot at ${inputFile}: pass --input <snapshot.json|directory> or mount the sealed /input\n`);
+  process.exit(2);
+}
+const out = arg('output', process.env.MAKEFUN_OUTPUT_DIR ?? '/output');
+
+const snapshot = parseSnapshot(readFileSync(inputFile, 'utf8'));
+const { board, radar } = buildRadar(snapshot);
+const issue = boardIssue(board, snapshot);
+if (issue !== null) {
+  process.stderr.write(`token radar: the model wrote a board the gate refuses: ${issue}\n`);
   process.exit(1);
 }
 
-function inputPath(argv: string[]): string {
-  const flag = argv.indexOf("--input");
-  if (flag !== -1 && argv[flag + 1]) return argv[flag + 1];
-  const fromEnv = process.env.MAKEFUN_INPUT_DIR;
-  if (fromEnv) return join(fromEnv, "snapshot.json");
-  return "/input/snapshot.json";
-}
+mkdirSync(out, { recursive: true });
+writeFileSync(join(out, 'board.json'), `${JSON.stringify({ rows: board, audited: radar.audited, excluded: radar.excluded, watchlist_covered: radar.watchlist_size })}\n`);
+writeFileSync(join(out, 'data.js'), dataScript(radar));
 
-function outputPath(): string {
-  return process.env.MAKEFUN_OUTPUT_DIR ?? "/output";
-}
-
-function readSnapshot(path: string): Snapshot {
-  if (!existsSync(path)) {
-    fail(
-      `no snapshot at ${path} (pass --input, or set MAKEFUN_INPUT_DIR)`,
-    );
-  }
-  const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
-  if (
-    typeof parsed !== "object" ||
-    parsed === null ||
-    !Array.isArray((parsed as Snapshot).protocols) ||
-    !Array.isArray((parsed as Snapshot).watchlist)
-  ) {
-    fail(`snapshot at ${path} is not a token-radar snapshot`);
-  }
-  return parsed as Snapshot;
-}
-
-function money(n: number): string {
-  return `$${Math.round(n).toLocaleString("en-US")}`;
-}
-
-function main(): void {
-  const snapshot = readSnapshot(inputPath(process.argv.slice(2)));
-  const outDir = outputPath();
-  mkdirSync(outDir, { recursive: true });
-
-  const { rows, model } = buildBoard(snapshot);
-  const watchlist = new Set(snapshot.watchlist);
-  const covered = rows.filter((r) => r.watchlist).length;
-  const verdicts = { FARM: 0, THIN: 0, SKIP: 0 };
-  for (const row of rows) verdicts[row.verdict]++;
-
-  const board = {
-    as_of: snapshot.as_of,
-    floor_usd: snapshot.floor_usd,
-    model,
-    rows_count: rows.length,
-    watchlist_covered: `${covered}/${watchlist.size}`,
-    verdicts,
-    rows,
-  };
-  writeFileSync(join(outDir, "board.json"), JSON.stringify(board, null, 2) + "\n");
-
-  const dashboardData = {
-    as_of: snapshot.as_of,
-    floor_usd: snapshot.floor_usd,
-    model,
-    rows_count: rows.length,
-    watchlist_covered: `${covered}/${watchlist.size}`,
-    verdicts,
-    rows,
-  };
-  writeFileSync(
-    join(outDir, "data.js"),
-    `window.TOKEN_RADAR = ${JSON.stringify(dashboardData)};\n`,
-  );
-
-  copyTree(join(SCRIPT_DIR, "dashboard"), join(outDir, "dashboard"));
-  copyTree(join(SCRIPT_DIR, "screenshots"), join(outDir, "screenshots"));
-
-  const dossier = buildDossier(outDir, { text_max_bytes: DOSSIER_TEXT_MAX_BYTES });
-  writeFileSync(join(outDir, "dossier.json"), dossier);
-
-  const top = rows[0] as PricedRow | undefined;
-  console.log(
-    `token-radar v5: ${rows.length} rows, watchlist ${covered}/${watchlist.size}, ` +
-      `verdicts FARM ${verdicts.FARM} / THIN ${verdicts.THIN} / SKIP ${verdicts.SKIP}, ` +
-      `top ${top ? `${top.name} ${money(top.implied_value_usd)}` : "none"}`,
-  );
-}
-
-function copyTree(from: string, to: string): void {
-  if (!existsSync(from)) fail(`missing ${from} next to main.ts`);
+function copyFiles(from: string, to: string): string[] {
+  if (!existsSync(from)) return [];
   mkdirSync(to, { recursive: true });
-  cpSync(from, to, { recursive: true, force: true });
+  const copied: string[] = [];
+  for (const name of readdirSync(from)) {
+    if (name.startsWith('.')) continue;
+    const path = join(from, name);
+    if (!statSync(path).isFile()) continue;
+    copyFileSync(path, join(to, name));
+    copied.push(name);
+  }
+  return copied;
 }
 
-main();
+copyFiles(join(here, 'dashboard'), join(out, 'dashboard'));
+const shots = copyFiles(join(here, 'screenshots'), join(out, 'screenshots'));
+if (shots.length < 3) {
+  process.stderr.write(`token radar: screenshots/ holds ${shots.length} image(s): hand in 3, the board, a detail view and a filtered view\n`);
+  process.exit(1);
+}
+const IMAGE_NAME = /^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$/;
+for (const name of shots) {
+  if (!IMAGE_NAME.test(name)) {
+    process.stderr.write(`token radar: screenshots/${name}: a name is letters, digits and . _ -, 1 to 128 characters\n`);
+    process.exit(1);
+  }
+}
+
+writeFileSync(join(out, 'dossier.json'), buildDossier(out, { text_max_bytes: TEXT_MAX_BYTES, screenshots: { max: 4, max_bytes: 524_288 }, dashboard: { max_files: 400, max_bytes: 4_194_304 } }));
+
+process.stdout.write(
+  `token radar: ${snapshot.protocols.length} protocols, ${snapshot.watchlist.length} on the watchlist, ${board.length} rows ranked, ${radar.audited} audited, ${radar.excluded} excluded with a reason\n` +
+    `token radar: wrote ${join(out, 'board.json')}, ${join(out, 'data.js')}, ${join(out, 'dashboard')}, ${join(out, 'screenshots')} (${shots.length} images) and ${join(out, 'dossier.json')}\n`,
+);

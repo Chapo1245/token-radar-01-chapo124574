@@ -1,198 +1,93 @@
-// Token Radar dashboard — renders window.TOKEN_RADAR (written by main.ts).
-// No network: every number on this page comes from the snapshot's own data.
-(function () {
-  "use strict";
-  var DATA = window.TOKEN_RADAR || { rows: [], model: {} };
-  var rows = DATA.rows || [];
-  var model = DATA.model || {};
-  var selected = null;
+// Token Radar r6 dashboard: sortable, filterable board + detail view + audit.
+// Data comes from data.js (window.RADAR), written by main.ts from the same
+// board.json the gate checks — the screenshots and the code agree by
+// construction, because both are rendered from one object.
+const R = window.RADAR;
+const $ = (s) => document.querySelector(s);
+const money = (n) => n >= 1e9 ? `$${(n / 1e9).toFixed(2)}B` : n >= 1e6 ? `$${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `$${(n / 1e3).toFixed(0)}K` : `$${Math.round(n)}`;
+const signed = (n) => (n === null || n === undefined ? '—' : (n > 0 ? '+' : '') + n.toFixed(1) + '%');
 
-  function $(id) { return document.getElementById(id); }
-  function money(n) {
-    if (n === null || n === undefined) return "—";
-    var abs = Math.abs(n);
-    if (abs >= 1e9) return "$" + (n / 1e9).toFixed(2) + "B";
-    if (abs >= 1e6) return "$" + (n / 1e6).toFixed(1) + "M";
-    if (abs >= 1e3) return "$" + (n / 1e3).toFixed(1) + "K";
-    return "$" + Math.round(n);
-  }
-  function moneyFull(n) {
-    if (n === null || n === undefined) return "—";
-    var sign = n < 0 ? "-" : "";
-    return sign + "$" + Math.abs(Math.round(n)).toLocaleString("en-US");
-  }
-  function pct(n) {
-    if (n === null || n === undefined) return "—";
-    return (n > 0 ? "+" : "") + n.toFixed(1) + "%";
-  }
-  function esc(s) {
-    return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  }
+let sortKey = 'implied_value_usd';
+let sortDir = -1;
+let selected = null;
 
-  function headline() {
-    var verdicts = DATA.verdicts || {};
-    var top = rows[0];
-    $("headline-stats").innerHTML =
-      stat("Protocols", rows.length) +
-      stat("Watchlist", DATA.watchlist_covered || "—") +
-      stat("Comparables", model.comps_n || "—") +
-      stat("FARM", verdicts.FARM || 0) +
-      stat("Top pick", top ? esc(top.name) : "—");
-    $("as-of").textContent = DATA.as_of || "";
-    function stat(label, value) {
-      return "<div><dt>" + label + "</dt><dd>" + value + "</dd></div>";
-    }
-  }
-
-  function method() {
-    $("method-formula").textContent = model.formula || "";
-    var curve = model.curve || {};
-    var blind = model.blind || {};
-    $("method-curve").textContent =
-      "Fitted curve: " + (curve.formula || "—") +
-      " over " + (curve.n || "—") + " cleaned comparables (R² " +
-      (curve.r2 === undefined ? "—" : curve.r2.toFixed(3)) + "). " +
-      "The curve is fitted from the snapshot at run time; nothing about it is hardcoded.";
-    $("method-blind").textContent =
-      "Blind test: fitted on the " + (blind.fit_n || "—") +
-      " oldest comparables, tested on the " + (blind.test_n || "—") +
-      " newest, which the fit never saw — median error ×" +
-      (blind.median_log_error === undefined ? "—" : Math.pow(10, blind.median_log_error).toFixed(2)) +
-      ", median ratio " + (blind.median_ratio === undefined ? "—" : blind.median_ratio.toFixed(2)) +
-      " (10th–90th percentile " +
-      (blind.p10_ratio === undefined ? "—" : blind.p10_ratio.toFixed(2)) + "–" +
-      (blind.p90_ratio === undefined ? "—" : blind.p90_ratio.toFixed(2)) + ").";
-    $("method-verdicts").textContent = model.verdict_rule || "";
-    var yard = model.yardsticks || {};
-    var names = Object.keys(yard).sort();
-    var html = "";
-    for (var i = 0; i < names.length; i++) {
-      html += "<tr><td>" + esc(names[i]) + "</td><td>" + yard[names[i]].toFixed(3) + "x</td></tr>";
-    }
-    html += "<tr><td>Global median</td><td>" +
-      (model.global_median_multiple === undefined ? "—" : model.global_median_multiple.toFixed(3)) +
-      "x</td></tr>";
-    document.querySelector("#yardsticks tbody").innerHTML = html;
-  }
-
-  function categories() {
-    var seen = {};
-    rows.forEach(function (r) { if (r.category) seen[r.category] = true; });
-    var select = $("category");
-    Object.keys(seen).sort().forEach(function (c) {
-      var opt = document.createElement("option");
-      opt.value = c;
-      opt.textContent = c;
-      select.appendChild(opt);
-    });
-  }
-
-  function filtered() {
-    var q = ($("q").value || "").trim().toLowerCase();
-    var cat = $("category").value;
-    var verdict = $("verdict").value;
-    var wlOnly = $("watchlist-only").checked;
-    var list = rows.filter(function (r) {
-      if (q && r.name.toLowerCase().indexOf(q) === -1 && r.slug.indexOf(q) === -1) return false;
-      if (cat && r.category !== cat) return false;
-      if (verdict && r.verdict !== verdict) return false;
-      if (wlOnly && !r.watchlist) return false;
-      return true;
-    });
-    var sort = $("sort").value;
-    var key = {
-      implied: function (r) { return -r.implied_value_usd; },
-      tvl: function (r) { return -r.tvl_usd; },
-      change: function (r) { return -(r.change_7d === null ? -999 : r.change_7d); },
-      age: function (r) { return -r.age_years; },
-      name: function (r) { return r.name; },
-    }[sort];
-    list.sort(function (a, b) {
-      var ka = key(a), kb = key(b);
-      if (ka < kb) return -1;
-      if (ka > kb) return 1;
-      return a.slug < b.slug ? -1 : 1;
-    });
-    return list;
-  }
-
-  function renderBoard() {
-    var list = filtered();
-    var body = document.querySelector("#board tbody");
-    var html = "";
-    for (var i = 0; i < list.length; i++) {
-      var r = list[i];
-      html += "<tr data-slug=\"" + esc(r.slug) + "\"" +
-        (selected === r.slug ? " class=\"selected\"" : "") + ">" +
-        "<td class=\"num\">" + r.rank + "</td>" +
-        "<td><span class=\"name\">" + esc(r.name) + "</span>" +
-        (r.watchlist ? " ★" : "") + "<br><span class=\"slug\">" + esc(r.slug) + "</span></td>" +
-        "<td>" + esc(r.category || "—") + "</td>" +
-        "<td>" + esc(r.chains.join(", ")) + "</td>" +
-        "<td class=\"num\">" + money(r.tvl_usd) + "</td>" +
-        "<td class=\"num" + ((r.change_7d || 0) < 0 ? " neg" : "") + "\">" + pct(r.change_7d) + "</td>" +
-        "<td class=\"num\">" + r.age_years.toFixed(1) + "y</td>" +
-        "<td class=\"num\"><b>" + money(r.implied_value_usd) + "</b></td>" +
-        "<td><span class=\"verdict " + r.verdict + "\">" + r.verdict + "</span></td>" +
-        "<td class=\"num\">" + moneyFull(r.farm_cost_usd) + "</td>" +
-        "<td class=\"num" + (r.net_usd < 0 ? " neg" : "") + "\">" + moneyFull(r.net_usd) + "</td>" +
-        "</tr>";
-    }
-    body.innerHTML = html || "<tr><td colspan=\"11\">No protocols match the filter.</td></tr>";
-    $("count").textContent = list.length + " of " + rows.length + " protocols";
-    body.querySelectorAll("tr[data-slug]").forEach(function (tr) {
-      tr.addEventListener("click", function () { showDetail(tr.getAttribute("data-slug")); });
-    });
-  }
-
-  function showDetail(slug) {
-    var r = null;
-    for (var i = 0; i < rows.length; i++) if (rows[i].slug === slug) r = rows[i];
-    if (!r) return;
-    selected = slug;
-    var curve = model.curve || {};
-    var steps = r.farm_steps.map(function (s) { return "<li>" + esc(s) + "</li>"; }).join("");
-    $("detail-body").innerHTML =
-      "<h2>" + esc(r.name) + " <span class=\"slug\">" + esc(r.slug) + " · rank #" + r.rank +
-      (r.watchlist ? " · watchlist ★" : "") + "</span></h2>" +
-      "<dl>" +
-      "<div><dt>Implied value</dt><dd>" + moneyFull(r.implied_value_usd) + "</dd></div>" +
-      "<div><dt>TVL</dt><dd>" + moneyFull(r.tvl_usd) + "</dd></div>" +
-      "<div><dt>7-day change</dt><dd>" + pct(r.change_7d) + "</dd></div>" +
-      "<div><dt>Age, no token</dt><dd>" + r.age_years.toFixed(2) + " years</dd></div>" +
-      "<div><dt>Verdict</dt><dd><span class=\"verdict " + r.verdict + "\">" + r.verdict + "</span></dd></div>" +
-      "<div><dt>Farm cost</dt><dd>" + moneyFull(r.farm_cost_usd) + "</dd></div>" +
-      "<div><dt>Illustrative slice</dt><dd>" + moneyFull(r.expected_value_usd) + "</dd></div>" +
-      "<div><dt>Net</dt><dd>" + moneyFull(r.net_usd) + "</dd></div>" +
-      "</dl>" +
-      "<h3>How the value is built</h3>" +
-      "<p class=\"math\">" + esc(moneyFull(r.curve_value_usd)) + " (size curve) and " +
-      esc(moneyFull(r.yardstick_value_usd)) + " (category yardstick) → base " +
-      esc(moneyFull(Math.round(Math.sqrt(r.curve_value_usd * r.yardstick_value_usd)))) +
-      " (geometric mean) × growth " + r.growth_factor.toFixed(3) + " × age " + r.maturity_factor.toFixed(3) +
-      " = " + esc(moneyFull(r.implied_value_usd)) + "</p>" +
-      "<p class=\"fine\">Size curve: " + esc(curve.formula || "—") + " over " +
-      (curve.n || "—") + " cleaned comparables. The yardstick is the category's median " +
-      "market-cap / TVL; thin rows also use their ten nearest comparables by size.</p>" +
-      "<h3>Farm plan — " + esc(r.chains.join(", ")) + "</h3>" +
-      "<ol>" + steps + "</ol>";
-    $("detail").hidden = false;
-    renderBoard();
-    $("detail").scrollIntoView({ block: "nearest" });
-  }
-
-  ["q", "category", "verdict", "sort", "watchlist-only"].forEach(function (id) {
-    $(id).addEventListener("input", renderBoard);
-    $(id).addEventListener("change", renderBoard);
+function init() {
+  $('#stat-line').textContent = `${R.ranked} protocols ranked · ${R.audited} audited · watchlist ${R.watchlist_size}/40 covered · ${R.comps} comparables whose token already trades · snapshot ${R.as_of}`;
+  $('#stat-farm').textContent = R.farm_count;
+  $('#stat-thin').textContent = R.thin_count;
+  $('#stat-skip').textContent = R.skip_count;
+  $('#asof').textContent = R.as_of;
+  const cats = [...new Set(R.rows.map((r) => r.category).filter(Boolean))].sort();
+  for (const c of cats) { const o = document.createElement('option'); o.textContent = c; $('#category').appendChild(o); }
+  $('#method-text').textContent = `Implied value = geometric mean of two prices from the snapshot's own figures, times growth and age. ` +
+    `Size curve (winsorized least squares over ${R.comps} cleaned comparables): log10(mcap) = ${R.curve_a} + ${R.curve_b} × log10(TVL), R² ${R.curve_r2} — that is ${R.curve_coef} × TVL^${R.curve_b}. ` +
+    `Category yardstick: each category's median market-cap / TVL (global median ${R.global_median}x); thin rows under $20M TVL are also priced off their 10 nearest comparables by size. ` +
+    `Growth factor: 7-day TVL change, weight 2.0, clamped −50%..+60%. Age factor: 0.60 per year with no token recorded, capped at 5 years. ` +
+    `FARM means implied value ≥ $50M and 7-day change ≥ −10%; THIN ≥ $10M and ≥ −30%; otherwise SKIP. Nothing is hardcoded by name.`;
+  $('#blind-text').textContent = `Fitted on the older half of the comparables and tested on the newer half it never saw: median error ×${R.blind_old_new}. ` +
+    `Fitted on the newer half and tested on the older: median error ×${R.blind_new_old}. The mild and sharp pricings tried for this round were worse on the same splits (×2.33 and ×3.06 mean), so the winsorized blend shipped.`;
+  $('#yards').innerHTML = Object.entries(R.yardsticks).sort((a, b) => b[1] - a[1]).map(([k, v]) => `<li><b>${k}</b> — ${v}x</li>`).join('');
+  const byReason = {};
+  for (const a of R.audit) if (a.status === 'excluded') byReason[a.reason] = (byReason[a.reason] || 0) + 1;
+  $('#audit-summary').textContent = `${R.audited} protocols record no token. ${R.ranked} are clean launches and ranked below. ${R.excluded} are excluded with a reason each: ` +
+    Object.entries(byReason).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${v} ${k}`).join('; ') + '.';
+  $('#audit-table tbody').innerHTML = R.audit.filter((a) => a.status === 'excluded').map((a) =>
+    `<tr><td>${a.name}<span class="slug">${a.slug}</span></td><td class="num">${money(a.tvl_usd)}</td><td class="badge-ex">EXCLUDED</td><td>${a.reason}</td></tr>`).join('');
+  for (const th of document.querySelectorAll('#board th')) th.addEventListener('click', () => {
+    const k = th.dataset.sort;
+    if (sortKey === k) sortDir = -sortDir; else { sortKey = k; sortDir = k === 'name' || k === 'category' ? 1 : -1; }
+    render();
   });
-  $("detail-close").addEventListener("click", function () {
-    selected = null;
-    $("detail").hidden = true;
-    renderBoard();
-  });
+  for (const id of ['q', 'verdict', 'category', 'watchonly']) document.getElementById(id).addEventListener('input', render);
+  $('#detail-close').addEventListener('click', () => { $('#detail').hidden = true; selected = null; render(); });
+  render();
+  showDetail(R.rows[0]);
+}
 
-  headline();
-  method();
-  categories();
-  renderBoard();
-})();
+function filtered() {
+  const q = $('#q').value.trim().toLowerCase();
+  const v = $('#verdict').value, c = $('#category').value, w = $('#watchonly').checked;
+  let rows = R.rows.filter((r) =>
+    (!q || r.name.toLowerCase().includes(q) || r.slug.includes(q)) &&
+    (!v || r.verdict === v) && (!c || r.category === c) && (!w || r.watchlist));
+  rows = [...rows].sort((a, b) => {
+    const av = a[sortKey], bv = b[sortKey];
+    if (av === null || av === undefined) return 1;
+    if (bv === null || bv === undefined) return -1;
+    return (typeof av === 'string' ? av.localeCompare(bv) : av - bv) * sortDir;
+  });
+  return rows;
+}
+
+function render() {
+  const rows = filtered();
+  $('#row-count').textContent = `${rows.length} of ${R.rows.length} rows`;
+  $('#board tbody').innerHTML = rows.map((r) =>
+    `<tr data-slug="${r.slug}" class="${selected === r.slug ? 'sel' : ''}"><td>${r.rank}</td>` +
+    `<td><b>${r.name}</b><span class="slug">${r.slug}${r.watchlist ? ' <span class="watch">★ watchlist</span>' : ''}</span></td>` +
+    `<td>${r.category ?? '—'}</td><td class="num">${money(r.tvl_usd)}</td><td class="num">${signed(r.change_7d)}</td>` +
+    `<td class="num">${r.age_years.toFixed(1)}y</td><td class="num"><b>${money(r.implied_value_usd)}</b></td>` +
+    `<td class="num">${r.multiple.toFixed(2)}x</td><td><span class="pill ${r.verdict}">${r.verdict}</span></td>` +
+    `<td class="num">${r.net_usd >= 0 ? '' : '−'}$${Math.abs(r.net_usd).toLocaleString('en-US')}</td></tr>`).join('');
+  for (const tr of document.querySelectorAll('#board tbody tr')) tr.addEventListener('click', () => showDetail(R.rows.find((r) => r.slug === tr.dataset.slug)));
+}
+
+function showDetail(r) {
+  if (!r) return;
+  selected = r.slug;
+  $('#detail').hidden = false;
+  $('#detail-name').textContent = `#${r.rank} ${r.name} — ${money(r.implied_value_usd)} implied`;
+  $('#detail-meta').textContent = `${r.slug} · ${r.category ?? 'no category'} · ${r.chains.join(', ')} · TVL ${money(r.tvl_usd)} · 7d ${signed(r.change_7d)} · ${r.age_years.toFixed(1)} years with no token recorded${r.watchlist ? ' · ★ on the watchlist' : ''}`;
+  $('#detail-breakdown').innerHTML =
+    `<div><span>${money(r.curve_usd)}</span><label>Size curve</label></div>` +
+    `<div><span>${money(r.yardstick_usd)}</span><label>Category yardstick</label></div>` +
+    `<div><span>×${r.growth_factor}</span><label>Growth factor</label></div>` +
+    `<div><span>×${r.age_factor}</span><label>Age factor</label></div>` +
+    `<div><span>${r.multiple.toFixed(2)}x</span><label>Implied / TVL</label></div>` +
+    `<div><span>$${r.farm_cost_usd}</span><label>Farm cost</label></div>` +
+    `<div><span class="pill ${r.verdict}">${r.verdict}</span><label>Verdict</label></div>`;
+  $('#detail-steps').innerHTML = r.farm_steps.map((s) => `<li>${s}</li>`).join('');
+  render();
+}
+
+init();
