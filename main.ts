@@ -1,147 +1,179 @@
-// Token Radar — entrypoint (iteration v2).
+// main.ts — Launch Radar: build the ranked board and the dashboard data.
 //
-// Reads the sealed snapshot, ranks the pre-token protocols by the v2 value
-// model (see lib/model.ts), and writes everything the dashboard needs:
+// Reads the sealed snapshot, fits the comparables curve, ranks every
+// radar-eligible pre-token protocol by its implied launch value, writes
+// board.json and the dashboard's data.js, copies dashboard/ and
+// screenshots/ into the output, and writes dossier.json with the kit's
+// buildDossier. Standard library only; no network; deterministic — two
+// runs on the same input write byte-identical output.
 //
-//   /output/board.json     the ranked board (rows, ranks, implied values, farm plans)
-//   /output/data.js        window.TOKEN_RADAR: the board plus the reference lists
-//   /output/dashboard/     a copy of this repo's dashboard/
-//   /output/screenshots/   a copy of this repo's screenshots/
-//   /output/dossier.json   buildDossier's dossier of dashboard/ + screenshots/
-//
-// Usage (from the repo root):
+// Run it as the rules say:
 //   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts --input ../input/snapshot.json
-// With no --input the entry reads $MAKEFUN_INPUT_DIR/snapshot.json
-// (the grader mounts the competition input at /input and runs `node main.ts`).
-//
-// The run is deterministic: fixed key order, a total sort (implied value,
-// then slug), no clock, no randomness, no network. Two runs write the same
-// bytes.
+// The input defaults to $MAKEFUN_INPUT_DIR/snapshot.json when --input is
+// not given, and the output directory to $MAKEFUN_OUTPUT_DIR or "out".
 
-import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildDossier } from './vendor/makefun-board.ts';
 import {
-  BOARD_ROWS,
-  MODEL_NOTE,
-  MODEL_TEXT,
-  buildBoard,
-  buildLaunched,
-  recordsNoToken,
-  selectCandidates,
+  anchorConstant,
+  farmCost,
+  farmSteps,
+  fitComps,
+  formulaText,
+  impliedValue,
+  isRadarEligible,
+  verdictFor,
+  yearsListed,
   type Snapshot,
+  type SnapshotProtocol,
 } from './lib/model.ts';
 
 const REPO_ROOT = dirname(fileURLToPath(import.meta.url));
-const DOSSIER_TEXT_MAX_BYTES = 65536;
 
-function usageFail(message: string): never {
-  throw new Error(`token-radar: ${message}\nusage: node main.ts --input <snapshot.json> (MAKEFUN_OUTPUT_DIR=<dir>)`);
+/** Read a --flag value from the arguments, or null when it is absent. */
+function flagValue(args: string[], flag: string): string | null {
+  const at = args.indexOf(flag);
+  return at >= 0 && at + 1 < args.length ? (args[at + 1] as string) : null;
 }
 
-function parseArgs(argv: string[]): { inputPath: string; outputDir: string } {
-  let inputPath = '';
-  for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === '--input' && i + 1 < argv.length) inputPath = argv[++i] as string;
-    else if (argv[i]?.startsWith('--input=')) inputPath = (argv[i] as string).slice('--input='.length);
-  }
-  // The grader runs `node main.ts` with no arguments: default to the
-  // competition snapshot inside MAKEFUN_INPUT_DIR (mounted at /input).
-  if (!inputPath) inputPath = join(process.env.MAKEFUN_INPUT_DIR ?? '/input', 'snapshot.json');
-  const outputDir = process.env.MAKEFUN_OUTPUT_DIR ?? 'out';
-  return { inputPath, outputDir };
+/** One board row: the ranked protocol, its figures and its farm plan. */
+interface BoardRow {
+  slug: string;
+  name: string;
+  rank: number;
+  implied_value_usd: number;
+  tvl_usd: number;
+  change_7d: number | null;
+  age_years: number;
+  category: string | null;
+  chains: string[];
+  verdict: string;
+  farm_cost_usd: number;
+  farm_steps: string[];
 }
 
-function loadSnapshot(path: string): Snapshot {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(readFileSync(path, 'utf8'));
-  } catch {
-    usageFail(`cannot read snapshot at ${path}`);
+/** The whole board, in rank order, with the model that built it. */
+function buildBoard(snapshot: Snapshot): { rows: BoardRow[]; model: Record<string, unknown> } {
+  const fit = fitComps(snapshot.protocols);
+  // The board is every radar-eligible protocol, plus every watchlist slug
+  // even if the eligibility rule would leave it out: the gate requires
+  // the whole watchlist, and the watchlist is the floor, never the ceiling.
+  const bySlug = new Map(snapshot.protocols.map((p) => [p.slug, p]));
+  const boardSet = new Map<string, SnapshotProtocol>();
+  for (const p of snapshot.protocols) if (isRadarEligible(p)) boardSet.set(p.slug, p);
+  for (const slug of snapshot.watchlist) {
+    const p = bySlug.get(slug);
+    if (p !== undefined) boardSet.set(slug, p);
   }
-  const snap = parsed as Snapshot;
-  if (!snap || typeof snap.as_of !== 'string' || !Array.isArray(snap.protocols) || !Array.isArray(snap.watchlist)) {
-    usageFail(`snapshot at ${path} is not a token-radar snapshot`);
-  }
-  return snap;
+  const board = [...boardSet.values()];
+  const anchorK = anchorConstant(board, fit);
+
+  const scored = board.map((p) => {
+    const value = impliedValue(p, snapshot.as_of, anchorK);
+    const cost = farmCost(p);
+    const verdict = verdictFor(value, p.change_7d);
+    return { p, value, cost, verdict };
+  });
+  // Rank by implied value, highest first; the slug breaks ties so the
+  // order is the same on every run.
+  scored.sort((a, b) => (b.value - a.value) || (a.p.slug < b.p.slug ? -1 : a.p.slug > b.p.slug ? 1 : 0));
+
+  const rows: BoardRow[] = scored.map((s, i) => ({
+    slug: s.p.slug,
+    name: s.p.name,
+    rank: i + 1,
+    implied_value_usd: Math.max(1, Math.round(s.value)),
+    tvl_usd: s.p.tvl_usd,
+    change_7d: s.p.change_7d,
+    age_years: Math.round(yearsListed(s.p, snapshot.as_of) * 100) / 100,
+    category: s.p.category,
+    chains: s.p.chains,
+    verdict: s.verdict,
+    farm_cost_usd: s.cost.gasUsd + s.cost.capitalUsd,
+    farm_steps: farmSteps(s.p, Math.max(1, Math.round(s.value)), s.verdict, s.cost),
+  }));
+
+  const model = {
+    formula: formulaText(anchorK),
+    anchor_k: Math.round(anchorK * 100) / 100,
+    comps: {
+      log_mcap: `${fit.intercept.toFixed(3)} + ${fit.slope.toFixed(3)} x log10(TVL)`,
+      intercept: Math.round(fit.intercept * 1000) / 1000,
+      slope: Math.round(fit.slope * 1000) / 1000,
+      r2: Math.round(fit.r2 * 1000) / 1000,
+      n: fit.n,
+      holdout_n: fit.holdoutN,
+      holdout_median_log_error: Math.round(fit.holdoutMedianLogErr * 1000) / 1000,
+      holdout_factor: Math.round(fit.holdoutFactor * 100) / 100,
+    },
+    verdict_rule:
+      'FARM when implied value is at least $50M and 7-day TVL change is at least -10%; THIN when implied value is at least $10M and change is at least -30%; otherwise SKIP.',
+    note: 'Implied value is this entry\u2019s own claim from the snapshot\u2019s figures. It never predicts whether or when a token launches. A protocol is said to record no token, never to have none.',
+  };
+  return { rows, model };
+}
+
+/** Write the outputs for one run. Returns the summary line for the log. */
+function run(inputPath: string, outputDir: string): string {
+  const snapshot = JSON.parse(readFileSync(inputPath, 'utf8')) as Snapshot;
+  const { rows, model } = buildBoard(snapshot);
+  const watchlistCovered = snapshot.watchlist.filter((slug) => rows.some((r) => r.slug === slug)).length;
+  const verdictCounts = { FARM: 0, THIN: 0, SKIP: 0 };
+  for (const r of rows) verdictCounts[r.verdict as 'FARM' | 'THIN' | 'SKIP']++;
+
+  rmSync(outputDir, { recursive: true, force: true });
+  mkdirSync(outputDir, { recursive: true });
+
+  const board = {
+    as_of: snapshot.as_of,
+    floor_usd: snapshot.floor_usd,
+    model,
+    rows_count: rows.length,
+    watchlist_covered: `${watchlistCovered}/${snapshot.watchlist.length}`,
+    verdicts: verdictCounts,
+    rows,
+  };
+  writeFileSync(join(outputDir, 'board.json'), `${JSON.stringify(board, null, 2)}\n`, 'utf8');
+
+  const data = {
+    as_of: snapshot.as_of,
+    floor_usd: snapshot.floor_usd,
+    model: model.formula,
+    model_note: model.note,
+    comps: model.comps,
+    verdict_rule: model.verdict_rule,
+    verdicts: verdictCounts,
+    rows,
+  };
+  writeFileSync(join(outputDir, 'data.js'), `window.TOKEN_RADAR = ${JSON.stringify(data)};\n`, 'utf8');
+
+  // The dashboard and its screenshots are copied as they stand in the
+  // repository; the dossier is built from the copies, so what the judge
+  // reads is exactly what this run wrote.
+  cpSync(join(REPO_ROOT, 'dashboard'), join(outputDir, 'dashboard'), { recursive: true });
+  cpSync(join(REPO_ROOT, 'screenshots'), join(outputDir, 'screenshots'), { recursive: true });
+  const dossier = buildDossier(outputDir, { text_max_bytes: 65536 });
+  writeFileSync(join(outputDir, 'dossier.json'), dossier);
+
+  const top = rows[0] as BoardRow;
+  return `token-radar v4: ${rows.length} rows, watchlist ${watchlistCovered}/${snapshot.watchlist.length}, ` +
+    `verdicts FARM ${verdictCounts.FARM} / THIN ${verdictCounts.THIN} / SKIP ${verdictCounts.SKIP}, ` +
+    `top ${top.name} $${top.implied_value_usd.toLocaleString('en-US')}`;
 }
 
 function main(): void {
-  const { inputPath, outputDir } = parseArgs(process.argv.slice(2));
-  const snap = loadSnapshot(inputPath);
-
-  const { candidates, setAside } = selectCandidates(snap);
-  const { rows, watchlistCovered } = buildBoard(snap, candidates);
-  if (rows.length !== BOARD_ROWS) {
-    throw new Error(`token-radar: expected ${BOARD_ROWS} board rows, built ${rows.length}`);
+  const args = process.argv.slice(2);
+  const inputPath =
+    flagValue(args, '--input') ??
+    (process.env.MAKEFUN_INPUT_DIR ? join(process.env.MAKEFUN_INPUT_DIR, 'snapshot.json') : 'input/snapshot.json');
+  const outputDir = process.env.MAKEFUN_OUTPUT_DIR ?? 'out';
+  if (!existsSync(inputPath)) {
+    console.error(`token-radar: no snapshot at ${inputPath} (pass --input, or set MAKEFUN_INPUT_DIR)`);
+    process.exit(1);
   }
-  if (watchlistCovered !== snap.watchlist.length) {
-    throw new Error(`token-radar: watchlist covered ${watchlistCovered}/${snap.watchlist.length}`);
-  }
-  const launched = buildLaunched(snap);
-  const tokenTrades = snap.protocols.filter((p) => !recordsNoToken(p)).length;
-
-  // Gate guardrails, checked here so a bad row fails loudly instead of
-  // shipping: implied values are positive whole dollars within the cap,
-  // every row carries 3–12 farm steps of 20–600 characters each.
-  for (const r of rows) {
-    if (!Number.isInteger(r.implied_value_usd) || r.implied_value_usd < 1 || r.implied_value_usd > 100_000_000_000_000) {
-      throw new Error(`token-radar: row ${r.slug} has an invalid implied value ${r.implied_value_usd}`);
-    }
-    if (r.farm_steps.length < 3 || r.farm_steps.length > 12) {
-      throw new Error(`token-radar: row ${r.slug} has ${r.farm_steps.length} farm steps`);
-    }
-    for (const s of r.farm_steps) {
-      const t = s.trim();
-      if (t.length < 20 || t.length > 600) {
-        throw new Error(`token-radar: row ${r.slug} has a farm step of ${t.length} characters`);
-      }
-    }
-  }
-
-  const board = {
-    as_of: snap.as_of,
-    floor_usd: snap.floor_usd,
-    model: MODEL_TEXT,
-    rows_count: rows.length,
-    watchlist_covered: watchlistCovered,
-    rows,
-  };
-  const data = {
-    as_of: snap.as_of,
-    floor_usd: snap.floor_usd,
-    model: MODEL_TEXT,
-    model_note: MODEL_NOTE,
-    rows,
-    launched,
-    excluded_no_token: setAside,
-    counts: {
-      protocols: snap.protocols.length,
-      candidates: rows.length,
-      watchlist: snap.watchlist.length,
-      token_trades: tokenTrades,
-    },
-  };
-
-  mkdirSync(outputDir, { recursive: true });
-  writeFileSync(join(outputDir, 'board.json'), JSON.stringify(board, null, 2) + '\n', 'utf8');
-  writeFileSync(join(outputDir, 'data.js'), 'window.TOKEN_RADAR = ' + JSON.stringify(data) + ';\n', 'utf8');
-
-  // The dashboard and its screenshots are copied verbatim; the program never edits them.
-  for (const dir of ['dashboard', 'screenshots']) {
-    rmSync(join(outputDir, dir), { recursive: true, force: true });
-    cpSync(join(REPO_ROOT, dir), join(outputDir, dir), { recursive: true });
-  }
-
-  const dossier = buildDossier(outputDir, { text_max_bytes: DOSSIER_TEXT_MAX_BYTES });
-  writeFileSync(join(outputDir, 'dossier.json'), dossier);
-
-  const top = rows[0] as (typeof rows)[number];
-  console.log(
-    `token-radar v2: ${rows.length} rows, watchlist ${watchlistCovered}/${snap.watchlist.length}, ` +
-      `top ${top.name} $${top.implied_value_usd.toLocaleString('en-US')}`,
-  );
+  console.log(run(inputPath, outputDir));
 }
 
 main();

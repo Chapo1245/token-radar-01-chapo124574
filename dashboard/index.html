@@ -1,79 +1,120 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Token Radar — which pre-token protocol is worth farming next</title>
+<title>Launch Radar — pre-token protocols ranked by implied launch value</title>
 <link rel="stylesheet" href="app.css">
 </head>
 <body>
-<header class="top">
-  <div>
-    <h1>TOKEN RADAR</h1>
-    <p class="tag">Every protocol that records no token, ranked by what its launch would be worth — and how to farm it.</p>
-  </div>
-  <div class="meta" id="meta"></div>
+<header class="masthead">
+  <p class="eyebrow">Make.fun &middot; token-radar-01 &middot; sealed snapshot 13 Nov 2026</p>
+  <h1>Launch Radar</h1>
+  <p class="lede">Which pre-token protocol is worth farming next, and what to do about it.
+  Every protocol below records no token yet. Each is ranked by an implied launch
+  value worked out from the snapshot&rsquo;s own figures, and each carries a farm
+  plan that says what it costs and how long it takes &mdash; then a net verdict:
+  farm it, farm it thin, or skip it.</p>
+  <dl class="stats">
+    <div><dt>Protocols ranked</dt><dd id="stat-rows">&ndash;</dd></div>
+    <div><dt>Watchlist covered</dt><dd id="stat-watchlist">40 / 40</dd></div>
+    <div><dt>Verdict: farm</dt><dd id="stat-farm">&ndash;</dd></div>
+    <div><dt>Verdict: thin</dt><dd id="stat-thin">&ndash;</dd></div>
+    <div><dt>Verdict: skip</dt><dd id="stat-skip">&ndash;</dd></div>
+    <div><dt>Top implied value</dt><dd id="stat-top">&ndash;</dd></div>
+  </dl>
 </header>
 
-<section class="method">
-  <h2>How the ranking works</h2>
-  <p><strong>Implied value = 20 × TVL<sup>0.80</sup> × exp(0.010 × clamp(7-day change, −50, 100)) × (1 + 0.35 × min(years listed, 5)).</strong>
-  <span id="formula"></span>
-  The model reads only the snapshot's own figures — TVL, 7-day change, years listed
-  with no token — never a list of names. A protocol "records no token" when DefiLlama
-  carries no token for it; that is the record, not proof it has none. Implied values
-  are this board's own claim, never a prediction that a token will launch.</p>
+
+
+<section class="controls" aria-label="Filter and sort the board">
+  <label>Search <input id="q" type="search" placeholder="Protocol name or slug&hellip;" autocomplete="off"></label>
+  <label>Category
+    <select id="category"><option value="">All categories</option></select>
+  </label>
+  <label>Verdict
+    <select id="verdict">
+      <option value="">All verdicts</option>
+      <option value="FARM">FARM</option>
+      <option value="THIN">THIN</option>
+      <option value="SKIP">SKIP</option>
+    </select>
+  </label>
+  <label>Sort by
+    <select id="sort">
+      <option value="value">Implied value, highest first</option>
+      <option value="tvl">TVL, highest first</option>
+      <option value="growth">7-day change, highest first</option>
+      <option value="age">Age with no token, longest first</option>
+      <option value="name">Name, A to Z</option>
+    </select>
+  </label>
+  <p class="count" id="count"></p>
 </section>
 
-<section class="controls">
-  <input id="q" type="search" placeholder="Search name or slug…" aria-label="Search protocols">
-  <select id="cat" aria-label="Filter by category"><option value="">All categories</option></select>
-  <select id="chain" aria-label="Filter by chain"><option value="">All chains</option></select>
-  <select id="sort" aria-label="Sort board">
-    <option value="rank">Sort: implied value</option>
-    <option value="tvl">Sort: TVL</option>
-    <option value="growth">Sort: 7-day growth</option>
-    <option value="age">Sort: oldest listed</option>
-  </select>
-  <label class="check"><input id="watch" type="checkbox"> Watchlist only</label>
-  <span id="count" class="count"></span>
-</section>
-
-<main class="layout">
-  <div class="board-wrap">
-    <table id="board">
-      <colgroup><col style="width:4%"><col style="width:23%"><col style="width:15%"><col style="width:16%"><col style="width:10%"><col style="width:8%"><col style="width:7%"><col style="width:17%"></colgroup>
-      <thead><tr>
-        <th data-k="rank">#</th><th data-k="name">Protocol</th><th data-k="category">Category</th>
-        <th data-k="chains">Chains</th><th data-k="tvl">TVL</th><th data-k="growth">7d</th>
-        <th data-k="age">Age</th><th data-k="value">Implied value</th>
-      </tr></thead>
-      <tbody id="rows"></tbody>
-    </table>
-    <p class="hint">Click any row for its detail view and farm plan.</p>
-  </div>
-  <aside class="detail" id="detail" aria-live="polite">
-    <p class="empty">Select a protocol to see its value breakdown and farm plan.</p>
-  </aside>
+<main class="board-wrap">
+  <table class="board">
+    <thead>
+      <tr>
+        <th class="num">#</th>
+        <th>Protocol</th>
+        <th>Category</th>
+        <th class="num">Chains</th>
+        <th class="num">TVL</th>
+        <th class="num">7-day</th>
+        <th class="num">Age</th>
+        <th class="num">Implied value</th>
+        <th>Verdict</th>
+      </tr>
+    </thead>
+    <tbody id="rows"></tbody>
+  </table>
+  <p class="empty" id="empty" hidden>No protocol matches this filter. Clear the search or pick another category.</p>
 </main>
 
-<section class="refs">
-  <div>
-    <h2>Already launched — not a launch bet</h2>
-    <p>These protocols record a token that already trades, so they are not ranked here. Shown by market cap for reference.</p>
-    <ul id="launched"></ul>
-  </div>
-  <div>
-    <h2>Records no token, but not a launch</h2>
-    <p>Exchanges, bridges and wrapped or staked products record no token of their own, yet are not a protocol waiting on a launch. Largest ones, with the reason each is set aside:</p>
-    <ul id="excluded"></ul>
-  </div>
+<aside class="detail" id="detail" aria-label="Protocol detail">
+  <p class="detail-hint">Select a row to see its farm plan.</p>
+</aside>
+
+<section class="method" aria-label="How the value is worked out">
+  <h2>How the value is worked out</h2>
+  <p class="formula"><code id="formula">implied = 10.04 &times; TVL^0.80 &times; (1 + 1.5 &times; clamp(change_7d, &minus;50, +60) / 100) &times; (1 + 0.45 &times; min(age_years, 5))</code></p>
+  <p>The constant is not picked by hand. It is anchored to the market: the
+  comparables curve <code>log10(mcap) = 3.908 + 0.405 &times; log10(TVL)</code>,
+  fitted on the <span id="comps-n">94</span> trading protocols whose market cap is
+  comparable to their TVL (R&sup2; <span id="comps-r2">0.103</span>). The constant is
+  chosen so the model&rsquo;s median, at neutral growth and age, equals that
+  curve&rsquo;s median prediction over this board. The curve was also tested
+  blind: fitted on four fifths of the comparables and scored on the fifth
+  (<span id="comps-holdout">16</span> protocols), the median error was
+  &times;<span id="comps-factor">3.40</span> &mdash; wide, and stated as wide, which
+  is why the curve anchors the scale and the power law carries the ranking.</p>
+  <p>Growth is linear and clamped, so one wild week cannot crown a protocol on
+  its own. Age is the years since DefiLlama began tracking the protocol with no
+  token recorded, capped at five. The board holds only genuine launch
+  candidates: pre-token, and not a wrapped, staked or bridged product of a token
+  that already trades, not an exchange, and not a versioned copy &mdash; the
+  watchlist&rsquo;s own rule, without its $50M floor, so early protocols below
+  the floor are found too. Protocols whose token already trades are used only
+  to fit the curve; they are not ranked here.</p>
+  <p class="verdict-rule"><strong>Verdict rule.</strong>
+  <span class="pill farm">FARM</span> implied value at least $50M and 7-day TVL
+  change at least &minus;10%. <span class="pill thin">THIN</span> implied value at
+  least $10M and change at least &minus;30%. <span class="pill skip">SKIP</span>
+  anything else: the farm costs more in time than it is likely to return.</p>
 </section>
 
-<footer>
-  <p>Token Radar · snapshot <span id="asof"></span> · watchlist floor $50M · 198 launch candidates from 758 protocols.
-  Farm plans are guidance, not financial advice; never share a seed phrase and never approve unlimited spending.</p>
+<footer class="foot">
+  <p>Implied value is this entry&rsquo;s own claim from the snapshot&rsquo;s figures.
+  It never predicts whether or when a token launches. A protocol is said to
+  record no token, never to have none: its DefiLlama record may simply not
+  carry one. Farm plans are a reader&rsquo;s starting point, not financial
+  advice; check the protocol yourself before you put money in.</p>
+  <p>Built for the make.fun bounty &ldquo;Build the best token launch radar&rdquo;:
+  make.fun/bounty/token-radar-01 &middot; snapshot as of 2026-11-13, floor $50M,
+  758 protocols, 40 on the watchlist.</p>
 </footer>
+
 <script src="../data.js"></script>
 <script src="app.js"></script>
 </body>

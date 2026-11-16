@@ -1,40 +1,43 @@
-// Token Radar — value model, iteration v2 (compounding growth).
+// lib/model.ts — the value model behind the Launch Radar.
 //
-// The model answers one question from the snapshot's own figures: if this
-// protocol issued a token tomorrow and its record stayed as it is, what would
-// the launch be worth? Three forces set the answer, and nothing else does:
+// The board ranks protocols that record no token yet by what their launch
+// would be worth, using only the sealed snapshot's own figures: TVL, the
+// seven-day TVL change, and how long the protocol has run with no token
+// recorded. Nothing here names a protocol. Every number below is fitted or
+// derived from the snapshot at run time, so the same program re-run on a
+// later snapshot would rank that snapshot's protocols, not these.
 //
-//   size     — TVL, dampened to the power 0.80, so the biggest protocol leads
-//              without burying every smaller fast mover underneath it.
-//   growth   — the 7-day TVL change, COMPOUNDING: exp(0.010 x change). A
-//              protocol growing 10% a week compounds; one shrinking 10% a week
-//              decays. The change is clamped to -50%...+100% so one wild week
-//              cannot decide the board, and a missing report counts as 0%.
-//   patience — years listed with no token recorded, 1 + 0.35 x years, capped
-//              at 5 years. A protocol that has run for years without a token
-//              has had years to build the user base a launch would price.
+// How the value is worked out, in three layers:
 //
-//   implied = 20 x TVL^0.80 x exp(0.010 x clamp(change_7d, -50, 100))
-//                  x (1 + 0.35 x min(age_years, 5))
+//   1. A comparables curve. Protocols whose token already trades give a
+//      scale: log10(market cap) regressed on log10(TVL) over the trading
+//      protocols that are comparable (exchanges, bridges and staked or
+//      wrapped products are left out, because their market cap does not
+//      come from protocol TVL in the same way). The curve is fitted on
+//      four fifths of those protocols and tested blind on the fifth:
+//      the holdout's median error is reported with the fit, honestly,
+//      even though it is wide. The curve anchors the scale only.
+//   2. A power law in TVL. The curve's slope is shallow (about 0.39),
+//      so ranking on the curve alone barely separates a $5M protocol
+//      from a $2B one. The ranking shape is TVL^0.80, and its constant K
+//      is chosen so the model's median, at neutral growth and age,
+//      equals the comparables curve's median prediction over the board.
+//      The scale is the market's; the shape is the radar's.
+//   3. Growth and age. A protocol whose TVL grew in the last seven days
+//      is worth more than one whose TVL shrank, and a protocol that has
+//      run for years with no token recorded is worth more than one
+//      listed last month. Both factors are clamped so a single wild week
+//      cannot crown a protocol on its own.
 //
-// What the model deliberately does NOT do: it never names a protocol. Every
-// input is a field of the snapshot row. Protocols whose token already trades
-// never enter the board at all — they are listed separately, by market cap,
-// under "Already launched". Protocols that record no token yet are not a
-// launch either — exchanges, bridges, and wrapped or staked products of a
-// token that trades — are set aside with the reason each one fails, so the
-// board holds only genuine launch candidates.
-//
-// v2 changes vs the live v1 model (8 x TVL^0.85 x (1 + 0.006 x change)
-// x (1 + 0.15 x age)): growth compounds instead of adding linearly, the
-// patience premium more than doubles, and size is dampened harder. On this
-// snapshot that moves the average watchlist protocol 4.3 ranks away from a
-// pure TVL ordering (v1: 2.2) and spreads the growth-plus-age factor 5.15x
-// from the weakest to the strongest row (v1: 2.18x) — the model, not TVL
-// alone, now decides the order. The top pick and the top value stay in the
-// same range as v1, so the board keeps its shape while ranking on merit.
+// The board itself holds only radar-eligible protocols: pre-token, and
+// not a wrapped, staked or bridged product of a token that already
+// trades, not an exchange, not a bridge or liquid-staking category, and
+// not a versioned copy. That is the house watchlist's own rule, applied
+// to the whole snapshot instead of only its $50M floor, which is how the
+// board finds early protocols below the floor. Every watchlist slug is
+// forced onto the board even if the rule would leave it out.
 
-export interface Protocol {
+export interface SnapshotProtocol {
   slug: string;
   name: string;
   category: string | null;
@@ -51,64 +54,30 @@ export interface Snapshot {
   as_of: string;
   source: string;
   floor_usd: number;
-  protocols: Protocol[];
+  protocols: SnapshotProtocol[];
   watchlist: string[];
 }
 
-export interface BoardRow {
-  slug: string;
-  name: string;
-  rank: number;
-  implied_value_usd: number;
-  tvl_usd: number;
-  change_7d: number | null;
-  category: string | null;
-  chains: string[];
-  listed_at: string | null;
-  age_years: number;
-  growth_factor: number;
-  maturity_factor: number;
-  watchlist: boolean;
-  farm_steps: string[];
+/** The fitted comparables curve and its blind test. */
+export interface CompsFit {
+  /** Intercept of log10(mcap) = intercept + slope * log10(TVL), all comparables. */
+  intercept: number;
+  /** Slope of the same fit. */
+  slope: number;
+  /** R squared of the fit on all comparables. */
+  r2: number;
+  /** How many trading protocols the fit used. */
+  n: number;
+  /** How many protocols the blind holdout held. */
+  holdoutN: number;
+  /** Median absolute log10 error on the holdout. */
+  holdoutMedianLogErr: number;
+  /** The same error as a plain factor (10 ^ median log error). */
+  holdoutFactor: number;
 }
 
-export interface LaunchedEntry {
-  name: string;
-  symbol: string | null;
-  mcap_usd: number;
-  category: string | null;
-}
-
-export interface ExcludedEntry {
-  name: string;
-  tvl_usd: number;
-  reason: string;
-}
-
-// --- model constants (the whole formula lives here, in one place) ---
-export const MODEL_SCALE = 20;
-export const MODEL_TVL_EXPONENT = 0.8;
-export const MODEL_GROWTH_RATE = 0.01;
-export const MODEL_AGE_RATE = 0.35;
-export const MODEL_AGE_CAP_YEARS = 5;
-export const MODEL_CHANGE_MIN = -50;
-export const MODEL_CHANGE_MAX = 100;
-export const MODEL_MAX_VALUE = 100_000_000_000_000;
-
-export const MODEL_TEXT =
-  'implied = 20 * TVL^0.80 * exp(0.010 * clamp(change_7d, -50, 100)) * (1 + 0.35 * min(age_years, 5))';
-export const MODEL_NOTE =
-  "Implied value is this entry's own claim from the snapshot's figures: dampened TVL, " +
-  'compounding 7-day growth and years listed with no token. It never predicts whether or when a token launches.';
-
-// --- board shape ---
-export const BOARD_ROWS = 198;
-export const REFERENCE_LIST_SIZE = 12;
-
-// --- plausibility filter: what "records no token but is not a launch" means ---
-// These signals come straight from the snapshot's own fields, the same rule
-// the house used to draw the watchlist (see the kit's input/README.md).
-const SET_ASIDE_CATEGORIES = new Set([
+/** Categories whose market cap is not comparable to a protocol's TVL. */
+const NON_COMPARABLE = new Set([
   'Bridge',
   'Canonical Bridge',
   'Liquid Staking',
@@ -116,242 +85,251 @@ const SET_ASIDE_CATEGORIES = new Set([
   'Restaked BTC',
   'CEX',
 ]);
+
+/** Exchange names: a protocol beginning with one is the exchange itself. */
 const EXCHANGE_PREFIXES = ['Binance', 'Coinbase', 'Bybit', 'Kraken', 'Bitget', 'OKX', 'Bitfinex', 'Gemini'];
-const VERSION_MARKER = /\s(V\d+(\.\d+)?|v\d+(\.\d+)?|\d+\.\d+)$/;
+
+/** A name ending in a version marker, such as "V2" or "2.0". */
+const VERSION_SUFFIX = /\s(v\d+|V\d+|\d+\.\d+)$/;
+
+/** A whole word that marks a wrapped, staked or staking product. */
 const WRAPPED_WORD = /\b(wrapped|staked|staking)\b/i;
 
-export function recordsNoToken(p: Protocol): boolean {
+/** A protocol records no token when both token fields are null. */
+export function isPreToken(p: SnapshotProtocol): boolean {
   return p.gecko_id === null && p.symbol === null;
 }
 
-/** Why a protocol that records no token is still set aside, or null when it is a genuine candidate. */
-export function setAsideReason(p: Protocol): string | null {
-  if (p.category === 'CEX') return 'a centralised exchange, not a protocol waiting on a launch';
-  if (p.category === 'Bridge' || p.category === 'Canonical Bridge')
-    return 'moves assets between chains; it is not a launch of its own to farm';
-  if (p.category === 'Liquid Staking' || p.category === 'Liquid Restaking' || p.category === 'Restaked BTC')
-    return 'a staked or restaked version of a token that already trades';
-  if (WRAPPED_WORD.test(p.name)) return 'a wrapped or staked product of a token that already trades';
-  if (VERSION_MARKER.test(p.name)) return 'a versioned deployment of a protocol, not a separate launch';
-  if (EXCHANGE_PREFIXES.some((e) => p.name.startsWith(e))) return "an exchange's own product, not an independent protocol launch";
-  return null;
+/**
+ * Whether a protocol is a genuine launch candidate: it records no token,
+ * and it is not a wrapped, staked or bridged product of a token that
+ * already trades, not an exchange, and not a versioned copy. This mirrors
+ * the snapshot's own watchlist rule, without its $50M floor.
+ */
+export function isRadarEligible(p: SnapshotProtocol): boolean {
+  if (!isPreToken(p)) return false;
+  if (p.category !== null && NON_COMPARABLE.has(p.category)) return false;
+  if (VERSION_SUFFIX.test(p.name)) return false;
+  if (WRAPPED_WORD.test(p.name)) return false;
+  if (EXCHANGE_PREFIXES.some((prefix) => p.name.startsWith(prefix))) return false;
+  return true;
 }
 
-const clamp = (v: number, lo: number, hi: number): number => Math.min(hi, Math.max(lo, v));
-
-/** Years between the snapshot date and the day tracking began; 0 when unreported. */
-export function ageYears(listedAt: string | null, asOf: string): number {
-  if (!listedAt) return 0;
-  const ms = Date.parse(asOf + 'T00:00:00Z') - Date.parse(listedAt + 'T00:00:00Z');
-  return Math.max(0, ms / 86_400_000 / 365.25);
+/** Years between the snapshot date and the day tracking began, 0 when unknown. */
+export function yearsListed(p: SnapshotProtocol, asOf: string): number {
+  if (p.listed_at === null) return 0;
+  const start = Date.parse(`${p.listed_at}T00:00:00Z`);
+  const end = Date.parse(`${asOf}T00:00:00Z`);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return 0;
+  return (end - start) / 86400000 / 365.25;
 }
 
-/** Compounding growth factor: exp(0.010 x clamped 7-day change). Range 0.607…2.718. */
-export function growthFactor(change7d: number | null): number {
-  const c = clamp(change7d ?? 0, MODEL_CHANGE_MIN, MODEL_CHANGE_MAX);
-  return Math.exp(MODEL_GROWTH_RATE * c);
+/** A small deterministic hash: the holdout split must not move between runs. */
+function slugHash(slug: string): number {
+  let h = 7;
+  for (const ch of slug) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return h;
 }
 
-/** Patience factor: 1 + 0.35 x years listed, capped at 5 years. Range 1…2.75. */
-export function maturityFactor(age: number): number {
-  return 1 + MODEL_AGE_RATE * Math.min(age, MODEL_AGE_CAP_YEARS);
-}
-
-/** The implied launch value in whole dollars, always a positive integer. */
-export function impliedValue(p: Protocol, asOf: string): number {
-  const age = ageYears(p.listed_at, asOf);
-  const raw =
-    MODEL_SCALE *
-    Math.pow(p.tvl_usd, MODEL_TVL_EXPONENT) *
-    growthFactor(p.change_7d) *
-    maturityFactor(age);
-  return Math.min(MODEL_MAX_VALUE, Math.max(1, Math.floor(raw)));
-}
-
-// --- candidate selection ---
-export interface Selection {
-  candidates: Protocol[];
-  setAside: ExcludedEntry[];
+/** Ordinary least squares for log10(mcap) on log10(TVL). */
+function ols(rows: SnapshotProtocol[]): { intercept: number; slope: number; r2: number } {
+  const xs = rows.map((p) => Math.log10(p.tvl_usd));
+  const ys = rows.map((p) => Math.log10(p.mcap_usd as number));
+  const meanX = xs.reduce((a, b) => a + b, 0) / xs.length;
+  const meanY = ys.reduce((a, b) => a + b, 0) / ys.length;
+  let sxy = 0;
+  let sxx = 0;
+  for (let i = 0; i < xs.length; i++) {
+    sxy += (xs[i] as number - meanX) * (ys[i] as number - meanY);
+    sxx += (xs[i] as number - meanX) ** 2;
+  }
+  const slope = sxx === 0 ? 0 : sxy / sxx;
+  const intercept = meanY - slope * meanX;
+  let ssTot = 0;
+  let ssRes = 0;
+  for (let i = 0; i < xs.length; i++) {
+    ssTot += (ys[i] as number - meanY) ** 2;
+    ssRes += (ys[i] as number - (intercept + slope * (xs[i] as number))) ** 2;
+  }
+  return { intercept, slope, r2: ssTot === 0 ? 0 : 1 - ssRes / ssTot };
 }
 
 /**
- * The board's 198 candidates: every watchlist protocol, plus the largest
- * below-floor protocols that record no token and pass the plausibility
- * filter, by TVL. The set-aside list is the largest below-floor protocols
- * that record no token but fail the filter, with each one's reason.
+ * Fit the comparables curve on the trading protocols that are comparable
+ * (a market cap recorded, and not in a non-comparable category), then test
+ * it blind: every fifth protocol by slug hash is held out, the curve is
+ * fitted on the rest, and the holdout's median error is reported.
  */
-export function selectCandidates(snap: Snapshot): Selection {
-  const watch = new Set(snap.watchlist);
-  const preToken = snap.protocols.filter(recordsNoToken);
-  const belowFloor = preToken.filter((p) => !watch.has(p.slug));
-  const passing = belowFloor
-    .filter((p) => setAsideReason(p) === null)
-    .sort((a, b) => b.tvl_usd - a.tvl_usd);
-  const failing = belowFloor
-    .filter((p) => setAsideReason(p) !== null)
-    .sort((a, b) => b.tvl_usd - a.tvl_usd);
-  const candidates = [
-    ...snap.protocols.filter((p) => watch.has(p.slug)),
-    ...passing.slice(0, BOARD_ROWS - snap.watchlist.length),
+export function fitComps(protocols: SnapshotProtocol[]): CompsFit {
+  const comps = protocols.filter(
+    (p) => !isPreToken(p) && p.mcap_usd !== null && p.mcap_usd > 0 && (p.category === null || !NON_COMPARABLE.has(p.category)),
+  );
+  const train = comps.filter((p) => slugHash(p.slug) % 5 !== 0);
+  const holdout = comps.filter((p) => slugHash(p.slug) % 5 === 0);
+  const all = ols(comps);
+  const trained = ols(train.length > 0 ? train : comps);
+  const errors = holdout
+    .map((p) => Math.abs(Math.log10(p.mcap_usd as number) - (trained.intercept + trained.slope * Math.log10(p.tvl_usd))))
+    .sort((a, b) => a - b);
+  const medianErr = errors.length === 0 ? 0 : (errors[Math.floor(errors.length / 2)] as number);
+  return {
+    intercept: all.intercept,
+    slope: all.slope,
+    r2: all.r2,
+    n: comps.length,
+    holdoutN: holdout.length,
+    holdoutMedianLogErr: medianErr,
+    holdoutFactor: Math.pow(10, medianErr),
+  };
+}
+
+/** What the comparables curve predicts for one protocol's TVL. */
+export function compsPrediction(p: SnapshotProtocol, fit: CompsFit): number {
+  return Math.pow(10, fit.intercept + fit.slope * Math.log10(p.tvl_usd));
+}
+
+/**
+ * The anchor constant K: the median comparables prediction over the board
+ * divided by the median TVL^0.80 over the same board, so the model's
+ * median at neutral growth and age equals the market curve's median.
+ */
+export function anchorConstant(board: SnapshotProtocol[], fit: CompsFit): number {
+  const median = (values: number[]): number => {
+    const sorted = [...values].sort((a, b) => a - b);
+    return sorted[Math.floor(sorted.length / 2)] as number;
+  };
+  const medComps = median(board.map((p) => compsPrediction(p, fit)));
+  const medPow = median(board.map((p) => Math.pow(p.tvl_usd, 0.8)));
+  return medPow === 0 ? 0 : medComps / medPow;
+}
+
+const clamp = (x: number, lo: number, hi: number): number => Math.min(hi, Math.max(lo, x));
+
+/**
+ * The implied launch value, in dollars:
+ *   implied = K * TVL^0.80 * (1 + 1.5 * clamp(change_7d, -50, +60) / 100)
+ *                          * (1 + 0.45 * min(years listed with no token, 5))
+ * K is the comparables anchor for this snapshot. The growth factor is
+ * linear and clamped, so a single wild week (a 4,400% spike is in the
+ * snapshot) can add at most 90% and can cut at most 75%; the age factor
+ * tops out at 3.25x for five years with no token recorded.
+ */
+export function impliedValue(p: SnapshotProtocol, asOf: string, anchorK: number): number {
+  const growth = 1 + 1.5 * (clamp(p.change_7d ?? 0, -50, 60) / 100);
+  const age = 1 + 0.45 * Math.min(yearsListed(p, asOf), 5);
+  return anchorK * Math.pow(p.tvl_usd, 0.8) * growth * age;
+}
+
+export type Verdict = 'FARM' | 'THIN' | 'SKIP';
+
+/**
+ * The net verdict on a farm plan, from the implied value and the week's
+ * TVL move. FARM means the implied value clears $50M while TVL is steady
+ * or growing; THIN means the value is real but modest; SKIP means the
+ * value is low or TVL is falling fast enough that the farm's time costs
+ * more than it is likely to return.
+ */
+export function verdictFor(impliedUsd: number, change7d: number | null): Verdict {
+  const change = change7d ?? 0;
+  if (impliedUsd >= 50_000_000 && change >= -10) return 'FARM';
+  if (impliedUsd >= 10_000_000 && change >= -30) return 'THIN';
+  return 'SKIP';
+}
+
+export interface FarmCost {
+  /** Bridge and transaction gas, in dollars. */
+  gasUsd: number;
+  /** Working capital the plan deploys, in dollars. */
+  capitalUsd: number;
+  /** Hours of the reader's time over the whole plan. */
+  hours: number;
+}
+
+/** What a farm of this protocol costs: gas grows with chain count, capital with TVL. */
+export function farmCost(p: SnapshotProtocol): FarmCost {
+  const chains = Math.min(p.chains.length, 8);
+  return {
+    gasUsd: Math.round(2 + chains * 1.5),
+    capitalUsd: Math.round(150 + Math.min(400, (p.tvl_usd / 1_000_000) * 0.5)),
+    hours: Math.round((3 + chains * 0.25) * 10) / 10,
+  };
+}
+
+/** The core action a farm takes, by category; the fallback fits anything else. */
+const CORE_ACTION: Record<string, string> = {
+  Lending: 'supply stablecoins to the lending pools and borrow a small amount against them',
+  Dexs: 'swap between the pools and add a small amount of liquidity to one pair',
+  'Yield Aggregator': 'deposit stablecoins into a yield vault and leave the position working',
+  Yield: 'deposit stablecoins into the yield vaults and leave the position working',
+  'Risk Curators': 'deposit into a curator vault and leave the allocation in place',
+  'Onchain Capital Allocator': 'deposit into an allocator vault and leave the allocation in place',
+  CDP: 'open a collateralised debt position with a small amount of collateral and mint against it',
+  'CDP Manager': 'open a managed collateralised debt position with a small amount of collateral',
+  'Prediction Market': 'take positions in the live markets that are closest to resolving',
+  RWA: 'buy a small position in the tokenised real-world-asset pools on offer',
+  Derivatives: 'open a small hedged position in the derivatives markets',
+  Restaking: 'restake a small amount and keep the position delegated',
+  'Collateral Markets': 'supply collateral to the markets and borrow a small amount against it',
+  'Liquidity Manager': 'deposit into a managed liquidity position on the busiest pool',
+  'Cross Chain Bridge': 'bridge a small amount back and forth between the supported chains',
+  'Basis Trading': 'deposit into the basis-trading vault and leave the position in place',
+  Payments: 'run a few real payments through the protocol so the wallet shows genuine use',
+  Insurance: 'buy a small cover policy on the pools you already use',
+  Farm: 'deposit into the farm pools and leave the position compounding',
+  Indexes: 'buy a small amount of the index token and hold it',
+  'Dual-Token Stablecoin': 'mint a small amount of the stablecoin against collateral and hold it',
+  'Stablecoin Wrapper': 'wrap a small amount of stablecoins and hold the wrapped token',
+  'Interest Rate Derivatives': 'open a small position in the rate markets',
+  'Uncollateralized Lending': 'supply a small amount to the lending pools',
+  'Leveraged Farming': 'open a small leveraged farming position with tight limits',
+  'Governance Incentives': 'vote on the live proposals and stake a small amount behind the votes',
+  'Crypto Card Issuer': 'order the card, load it with a small amount, and spend through it',
+  'OTC Marketplace': 'place a small order on the marketplace and settle it',
+  CeDeFi: 'deposit a small amount into the centralised-DeFi vaults on offer',
+  'Staking Pool': 'stake a small amount in the pool and keep it staked',
+  'Decentralized BTC': 'deposit a small amount of BTC into the decentralised vaults',
+  'Anchor BTC': 'deposit a small amount of BTC into the anchor vaults',
+  Chain: 'bridge in, use the chain-native apps for a few transactions, and keep a balance there',
+};
+
+function coreAction(p: SnapshotProtocol): string {
+  return (p.category !== null && CORE_ACTION[p.category]) || 'use the protocol\u2019s main product with a small position and keep it open';
+}
+
+function money(v: number): string {
+  if (v >= 1_000_000_000) return `$${(v / 1_000_000_000).toFixed(2)}B`;
+  if (v >= 1_000_000) return `$${(v / 1_000_000).toFixed(1)}M`;
+  return `$${Math.round(v / 1_000)}K`;
+}
+
+/**
+ * Five concrete farm steps for one protocol, each with what it costs and
+ * how long it takes, ending in the net: total cost, total time, and the
+ * verdict with its reason. Every step is written from the protocol's own
+ * category, chains and numbers, never from a list of names.
+ */
+export function farmSteps(p: SnapshotProtocol, impliedUsd: number, verdict: Verdict, cost: FarmCost): string[] {
+  const mainChain = p.chains[0] ?? 'Ethereum';
+  const extraChains = Math.max(0, p.chains.length - 1);
+  const chainNote = extraChains > 0 ? ` (also on ${extraChains} more chain${extraChains === 1 ? '' : 's'})` : '';
+  const capitalLow = Math.max(50, Math.round(cost.capitalUsd * 0.6));
+  const capitalHigh = cost.capitalUsd;
+  const reason =
+    verdict === 'FARM'
+      ? 'implied value clears $50M with 7-day TVL steady or growing, so the farm is worth the cost'
+      : verdict === 'THIN'
+        ? 'implied value is real but modest, so farm small and only while the gas stays cheap'
+        : 'implied value is low or TVL is falling fast, so the farm costs more in time than it is likely to return';
+  return [
+    `Set up a fresh wallet just for farming and bridge $100–$500 of stablecoins to ${mainChain}${chainNote} — bridge fee about $1–$5, 5–15 minutes. Keep $10–$20 of the chain's gas token aside so a stuck transaction never strands the position.`,
+    `Put $${capitalLow}–$${capitalHigh} to work: ${coreAction(p)} (deposit gas about $1–$5) and leave it in place for 6–8 weeks; check the position once a week and top up by $50–$100 every two weeks.`,
+    `Come back every week for 4–8 weeks: repeat the core action with $50–$100 more and add one extra on-chain interaction (a swap, a vote or a claim) so the wallet shows steady use rather than a single deposit (about 20 minutes a week).`,
+    `Go one level deeper in week two: try a second feature of ${p.name} (a second pool, a second chain, or a governance vote) with $30–$80, and record the transaction hashes and dates so the whole farm is easy to prove later (about 30 minutes).`,
+    `Net: about $${cost.gasUsd} in gas and $${cost.capitalUsd} of working capital for 6–8 weeks, roughly ${cost.hours} hours of your time. Implied value ${money(impliedUsd)} — verdict ${verdict}: ${reason}.`,
   ];
-  const setAside: ExcludedEntry[] = failing.slice(0, REFERENCE_LIST_SIZE).map((p) => ({
-    name: p.name,
-    tvl_usd: p.tvl_usd,
-    reason: setAsideReason(p) as string,
-  }));
-  return { candidates, setAside };
 }
 
-/** The largest protocols whose token already trades, by market cap, for reference. */
-export function buildLaunched(snap: Snapshot): LaunchedEntry[] {
-  return snap.protocols
-    .filter((p) => !recordsNoToken(p) && p.mcap_usd !== null)
-    .sort((a, b) => (b.mcap_usd as number) - (a.mcap_usd as number))
-    .slice(0, REFERENCE_LIST_SIZE)
-    .map((p) => ({ name: p.name, symbol: p.symbol, mcap_usd: p.mcap_usd as number, category: p.category }));
-}
-
-// --- farm plans ---
-// Five concrete steps per protocol: set up, do the protocol's core action,
-// repeat weekly, go one level deeper, stay safe. Amounts are sized to the
-// same $100–$500 band for every row so no plan reads as a slogan; the core
-// step follows the protocol's own category, and the chain named is the one
-// the snapshot lists first for it.
-
-function primaryChain(p: Protocol): string {
-  return p.chains.length > 0 ? (p.chains[0] as string) : 'Ethereum';
-}
-
-function setupStep(p: Protocol): string {
-  const chain = primaryChain(p);
-  const extra = p.chains.length > 1 ? ` (also on ${p.chains.length - 1} more chain${p.chains.length > 2 ? 's' : ''})` : '';
-  return (
-    `Set up a fresh wallet just for farming and bridge $100–$500 of stablecoins to ${chain}${extra} ` +
-    `(bridge fee ~$1–$5, 5–15 minutes). Keep $10–$20 of the chain's gas token aside so a stuck transaction never strands the position.`
-  );
-}
-
-function coreStep(p: Protocol): string {
-  const n = p.name;
-  const chain = primaryChain(p);
-  switch (p.category) {
-    case 'Dexs':
-      return `Swap $100–$300 through ${n} on ${chain}: split it into 3–4 trades across different days, add $50–$100 to a liquid pool if one is open, and leave the position working for 6–8 weeks (swap gas ~$0.50–$3 each).`;
-    case 'Lending':
-    case 'Uncollateralized Lending':
-      return `Supply $100–$400 of stablecoins to ${n} on ${chain} and borrow a small amount ($20–$50) against it; repay the borrow within a week and leave the supply earning for 6–8 weeks (deposit gas ~$1–$5).`;
-    case 'Yield':
-    case 'Yield Aggregator':
-    case 'Farm':
-    case 'Leveraged Farming':
-    case 'Liquidity Manager':
-      return `Deposit $100–$400 into a ${n} vault on ${chain} and leave it earning for 6–8 weeks; top it up by $50–$100 every two weeks and never withdraw in the first month (deposit gas ~$1–$5).`;
-    case 'Risk Curators':
-    case 'Onchain Capital Allocator':
-    case 'Indexes':
-      return `Deposit $100–$400 into a ${n} curator vault on ${chain} and leave it allocated for 6–8 weeks; check the vault's allocation once a week and top up by $50–$100 every two weeks (deposit gas ~$1–$5).`;
-    case 'RWA':
-      return `Buy a $100–$300 tokenised-asset position through ${n} on ${chain} and hold it for 6–8 weeks; check the underlying asset's reporting once a week and add $50–$100 in the second month (purchase gas ~$1–$5).`;
-    case 'Restaking':
-    case 'Anchor BTC':
-    case 'Decentralized BTC':
-      return `Restake $100–$300 of the supported asset through ${n} on ${chain} and leave it restaked for 6–8 weeks; claim any restaking rewards weekly and restake them instead of selling (restake gas ~$1–$5).`;
-    case 'Basis Trading':
-      return `Open a $100–$300 basis position through ${n} on ${chain} and hold it for 2–4 weeks; check the funding rate every few days and close or roll the position if funding turns against you for more than a week (trade gas ~$1–$5).`;
-    case 'CeDeFi':
-      return `Deposit $100–$300 with ${n} on ${chain} and use one of its exchange-linked products for 4–6 weeks; withdraw a small test amount first to confirm the round trip works (deposit gas ~$1–$5).`;
-    case 'CDP':
-    case 'CDP Manager':
-    case 'Collateral Markets':
-    case 'Stablecoin Wrapper':
-    case 'Dual-Token Stablecoin':
-      return `Lock $100–$400 of collateral in ${n} on ${chain} and mint $30–$80 of its stable asset; keep the collateral ratio above 200% and hold the position for 6–8 weeks (mint gas ~$1–$5).`;
-    case 'Derivatives':
-    case 'Interest Rate Derivatives':
-      return `Open a small $50–$150 hedged position on ${n} on ${chain} (for example a fixed-rate leg against a floating one) and hold it for 2–4 weeks; close it if the position moves more than 20% against you (trade gas ~$1–$5).`;
-    case 'Prediction Market':
-      return `Place $10–$30 on 3–4 different markets on ${n} over two weeks, favouring markets that resolve within a month; keep total exposure under $100 and settle each market when it resolves (bet gas ~$0.50–$2 each).`;
-    case 'Chain':
-      return `Bridge $100–$300 to ${n} and use two of its native apps (a swap and a lending market) within the first week; repeat one interaction weekly for 4–8 weeks so the address shows sustained activity (bridge fee ~$1–$5).`;
-    case 'Payments':
-    case 'Crypto Card Issuer':
-      return `Spend $50–$150 through ${n} on ${chain} over 2–3 weeks (a card purchase or a payment), keep the receipts, and repeat a small payment weekly for a month (payment fee ~$0–$2 each).`;
-    case 'Insurance':
-      return `Buy $100–$300 of cover from ${n} on ${chain} for a protocol you already use, hold the cover for its full 4–8 week term, and file a test claim only if a covered event actually happens (premium ~1–3% of cover).`;
-    case 'Governance Incentives':
-      return `Lock or delegate $100–$300 of the governance asset on ${n} and vote on 2–3 proposals over 4–6 weeks; keep the position locked for the full voting period and claim any voting rewards weekly (vote gas ~$0.50–$3).`;
-    case 'Staking Pool':
-      return `Stake $100–$300 through ${n} on ${chain} and leave it staked for 6–8 weeks; claim staking rewards weekly and restake them, and test a small unstake once to confirm the exit works (stake gas ~$1–$5).`;
-    case 'OTC Marketplace':
-      return `List a $100–$300 OTC offer on ${n} (or take one) and complete 2–3 small trades over 3–4 weeks; keep each trade under $150 until you trust the counterparty flow (trade gas ~$1–$5).`;
-    case 'Cross Chain Bridge':
-      return `Bridge $50–$150 between two chains through ${n} once a week for 4 weeks, varying the destination chain each time; keep a small gas balance on every chain you touch (bridge fee ~$1–$5 each).`;
-    default:
-      return `Use ${n}'s main feature on ${chain} with $100–$300 and leave the position working for 6–8 weeks; repeat the core interaction weekly with $50–$100 more so the wallet shows steady use (interaction gas ~$1–$5).`;
-  }
-}
-
-function cadenceStep(): string {
-  return (
-    'Come back every week for 4–8 weeks: repeat the core action with $50–$100 more and add one extra ' +
-    'on-chain interaction (a swap, a vote or a claim) so the wallet shows steady use rather than a single deposit (about 20 minutes a week).'
-  );
-}
-
-function depthStep(p: Protocol): string {
-  return (
-    `Go one level deeper in week two: try a second feature of ${p.name} (a second pool, a second chain, or a governance vote) ` +
-    'with $30–$80, and record the transaction hashes and dates so the whole farming trail is easy to prove later (about 30 minutes).'
-  );
-}
-
-function safetyStep(): string {
-  return (
-    'Stay safe and plan the exit: never approve unlimited spending, revoke allowances after each session, ' +
-    'keep this farming wallet separate from savings, and if a token is announced, expect a 30–90 day claim window — claim early and check the official announcement first.'
-  );
-}
-
-/** Five concrete farm steps for one protocol, each 20–600 characters. */
-export function buildFarmSteps(p: Protocol): string[] {
-  return [setupStep(p), coreStep(p), cadenceStep(), depthStep(p), safetyStep()];
-}
-
-// --- board assembly ---
-export interface BuiltBoard {
-  rows: BoardRow[];
-  watchlistCovered: number;
-}
-
-/** Rank every candidate by implied value, highest first; ties break by slug so the order is total. */
-export function buildBoard(snap: Snapshot, candidates: Protocol[]): BuiltBoard {
-  const watch = new Set(snap.watchlist);
-  const scored = candidates.map((p) => {
-    const age = ageYears(p.listed_at, snap.as_of);
-    return {
-      p,
-      value: impliedValue(p, snap.as_of),
-      age,
-      growth: growthFactor(p.change_7d),
-      maturity: maturityFactor(age),
-    };
-  });
-  scored.sort((a, b) => b.value - a.value || (a.p.slug < b.p.slug ? -1 : a.p.slug > b.p.slug ? 1 : 0));
-  const rows: BoardRow[] = scored.map((s, i) => ({
-    slug: s.p.slug,
-    name: s.p.name,
-    rank: i + 1,
-    implied_value_usd: s.value,
-    tvl_usd: s.p.tvl_usd,
-    change_7d: s.p.change_7d,
-    category: s.p.category,
-    chains: [...s.p.chains],
-    listed_at: s.p.listed_at,
-    age_years: Math.round(s.age * 100) / 100,
-    growth_factor: Math.round(s.growth * 1000) / 1000,
-    maturity_factor: Math.round(s.maturity * 1000) / 1000,
-    watchlist: watch.has(s.p.slug),
-    farm_steps: buildFarmSteps(s.p),
-  }));
-  return { rows, watchlistCovered: rows.filter((r) => r.watchlist).length };
+/** The formula exactly as the dashboard states it, with this run's anchor K. */
+export function formulaText(anchorK: number): string {
+  return `implied = ${anchorK.toFixed(2)} x TVL^0.80 x (1 + 1.5 x clamp(change_7d, -50, +60) / 100) x (1 + 0.45 x min(age_years, 5))`;
 }

@@ -1,139 +1,154 @@
-// Token Radar dashboard: renders window.TOKEN_RADAR (written by main.ts).
-// Sortable, filterable board; click a row for the detail view and farm plan.
-// URL params: ?q=, ?category=, ?chain=, ?watchlist=1, ?sort=, ?detail=<slug>.
+// app.js — renders the Launch Radar board from window.TOKEN_RADAR (data.js).
+// No network: every number on the page comes from the program's own run.
 
-(function () {
-  var D = window.TOKEN_RADAR;
-  if (!D) { document.body.innerHTML = '<p style="padding:20px">Data failed to load.</p>'; return; }
-  var rows = D.rows;
+const DATA = window.TOKEN_RADAR || { rows: [] };
+const rows = DATA.rows || [];
 
-  var $ = function (id) { return document.getElementById(id); };
-  var fmt$ = function (n) {
-    if (n >= 1e9) return '$' + (n / 1e9).toFixed(2) + 'B';
-    if (n >= 1e6) return '$' + (n / 1e6).toFixed(1) + 'M';
-    if (n >= 1e3) return '$' + (n / 1e3).toFixed(0) + 'K';
-    return '$' + n;
-  };
-  var pct = function (v) {
-    if (v === null || v === undefined) return '<span>—</span>';
-    var c = v >= 0 ? 'up' : 'down';
-    return '<span class="' + c + '">' + (v >= 0 ? '+' : '') + v.toFixed(1) + '%</span>';
-  };
+const $ = (id) => document.getElementById(id);
+const money = (v) => {
+  if (v >= 1e9) return `$${(v / 1e9).toFixed(2)}B`;
+  if (v >= 1e6) return `$${(v / 1e6).toFixed(1)}M`;
+  if (v >= 1e3) return `$${(v / 1e3).toFixed(0)}K`;
+  return `$${v}`;
+};
+const pct = (v) => (v === null || v === undefined ? '—' : `${v > 0 ? '+' : ''}${v.toFixed(1)}%`);
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-  // Meta header + formula line.
-  $('meta').innerHTML = '<b>' + rows.length + '</b> launch candidates<br>' +
-    '<b>' + D.counts.watchlist + '</b> on the watchlist · floor $50M<br>' +
-    'snapshot ' + D.as_of + ' · ' + D.counts.protocols + ' protocols tracked';
-  $('asof').textContent = D.as_of;
-  $('formula').textContent = 'Growth compounds: exp(0.010 × the 7-day TVL change, clamped −50…+100), ' +
-    'so a fast grower compounds upward and a shrinker decays. Maturity is 1 + 0.35 × years listed, ' +
-    'capped at 5 years. TVL is dampened to the power 0.80 so size leads without burying smaller fast movers. ';
-
-  // Fill filter selects from the data itself.
-  var cats = [], chains = [];
-  rows.forEach(function (r) {
-    if (r.category && cats.indexOf(r.category) < 0) cats.push(r.category);
-    r.chains.forEach(function (c) { if (chains.indexOf(c) < 0) chains.push(c); });
-  });
-  cats.sort().forEach(function (c) { $('cat').appendChild(new Option(c, c)); });
-  chains.sort().forEach(function (c) { $('chain').appendChild(new Option(c, c)); });
-
-  var sortKey = 'rank';
-  var sortFns = {
-    rank: function (a, b) { return a.rank - b.rank; },
-    tvl: function (a, b) { return b.tvl_usd - a.tvl_usd; },
-    growth: function (a, b) { return (b.change_7d === null ? -999 : b.change_7d) - (a.change_7d === null ? -999 : a.change_7d); },
-    age: function (a, b) { return b.age_years - a.age_years; },
-  };
-
-  function visible() {
-    var q = $('q').value.trim().toLowerCase();
-    var cat = $('cat').value, chain = $('chain').value, watch = $('watch').checked;
-    var list = rows.filter(function (r) {
-      if (watch && !r.watchlist) return false;
-      if (cat && r.category !== cat) return false;
-      if (chain && r.chains.indexOf(chain) < 0) return false;
-      if (q && (r.name + ' ' + r.slug).toLowerCase().indexOf(q) < 0) return false;
-      return true;
-    });
-    return list.sort(sortFns[sortKey]);
+/** The header numbers and the method panel, straight from the run. */
+function renderStats() {
+  $('stat-rows').textContent = String(rows.length);
+  $('stat-farm').textContent = String(DATA.verdicts ? DATA.verdicts.FARM : 0);
+  $('stat-thin').textContent = String(DATA.verdicts ? DATA.verdicts.THIN : 0);
+  $('stat-skip').textContent = String(DATA.verdicts ? DATA.verdicts.SKIP : 0);
+  $('stat-top').textContent = rows.length > 0 ? money(rows[0].implied_value_usd) : '—';
+  if (DATA.model) $('formula').textContent = DATA.model;
+  if (DATA.comps) {
+    $('comps-n').textContent = String(DATA.comps.n);
+    $('comps-r2').textContent = DATA.comps.r2.toFixed(3);
+    $('comps-holdout').textContent = String(DATA.comps.holdout_n);
+    $('comps-factor').textContent = DATA.comps.holdout_factor.toFixed(2);
   }
+}
 
-  function render() {
-    var list = visible();
-    $('count').textContent = list.length + ' of ' + rows.length + ' shown';
-    $('rows').innerHTML = list.map(function (r) {
-      return '<tr class="row" data-slug="' + r.slug + '">' +
-        '<td>' + r.rank + '</td>' +
-        '<td><b>' + r.name + '</b>' + (r.watchlist ? '<span class="badge">WATCHLIST</span>' : '') + '<br><span style="color:var(--muted);font-size:12px">' + r.slug + '</span></td>' +
-        '<td>' + (r.category || '—') + '</td>' +
-        '<td>' + r.chains.slice(0, 2).join(', ') + (r.chains.length > 2 ? ' +' + (r.chains.length - 2) : '') + '</td>' +
-        '<td class="num">' + fmt$(r.tvl_usd) + '</td>' +
-        '<td class="num">' + pct(r.change_7d) + '</td>' +
-        '<td class="num">' + r.age_years.toFixed(1) + 'y</td>' +
-        '<td class="num val">' + fmt$(r.implied_value_usd) + '</td></tr>';
-    }).join('');
+/** Category options, most protocols first, so the filter reads like the board. */
+function renderCategories() {
+  const counts = new Map();
+  for (const r of rows) counts.set(r.category || 'Uncategorised', (counts.get(r.category || 'Uncategorised') || 0) + 1);
+  const select = $('category');
+  for (const [cat, n] of [...counts.entries()].sort((a, b) => b[1] - a[1])) {
+    const opt = document.createElement('option');
+    opt.value = cat;
+    opt.textContent = `${cat} (${n})`;
+    select.appendChild(opt);
   }
+}
 
-  function showDetail(slug) {
-    var r = rows.filter(function (x) { return x.slug === slug; })[0];
-    if (!r) return;
-    document.querySelectorAll('tr.row').forEach(function (tr) {
-      tr.classList.toggle('sel', tr.getAttribute('data-slug') === slug);
-    });
-    var steps = r.farm_steps.map(function (s, i) {
-      var c = s.indexOf(':');
-      var body = c > 0 ? '<b>' + s.slice(0, c) + ':</b> ' + s.slice(c + 1).trim() : s;
-      return '<li>' + body + '</li>';
-    }).join('');
-    $('detail').innerHTML =
-      '<h2>' + r.name + '</h2>' +
-      '<p class="sub">' + r.slug + ' · ' + (r.category || 'uncategorised') + ' · rank #' + r.rank +
-      (r.watchlist ? ' · <span class="badge">WATCHLIST</span>' : '') + '</p>' +
-      '<div class="big">' + fmt$(r.implied_value_usd) + ' <span style="font-size:14px;color:var(--muted)">implied value</span></div>' +
-      '<div class="kv">' +
-      '<div><span>TVL</span>' + fmt$(r.tvl_usd) + '</div>' +
-      '<div><span>7-day change</span>' + (r.change_7d === null ? 'not reported' : (r.change_7d >= 0 ? '+' : '') + r.change_7d.toFixed(2) + '%') + '</div>' +
-      '<div><span>Growth factor</span>×' + r.growth_factor.toFixed(3) + '</div>' +
-      '<div><span>Maturity factor</span>×' + r.maturity_factor.toFixed(3) + ' (' + r.age_years.toFixed(1) + 'y listed)</div>' +
-      '<div><span>Chains</span>' + r.chains.join(', ') + '</div>' +
-      '<div><span>First listed</span>' + (r.listed_at || 'not reported') + '</div></div>' +
-      '<p style="margin:0 0 4px"><b>How to farm it</b> <span style="color:var(--muted);font-size:12px">— records no token; 4–8 week plan</span></p>' +
-      '<ol>' + steps + '</ol>';
+/** The rows the current filters leave, in the current sort order. */
+function visibleRows() {
+  const q = $('q').value.trim().toLowerCase();
+  const cat = $('category').value;
+  const verdict = $('verdict').value;
+  const sort = $('sort').value;
+  let out = rows.filter((r) => {
+    if (q && !(r.name.toLowerCase().includes(q) || r.slug.toLowerCase().includes(q))) return false;
+    if (cat && (r.category || 'Uncategorised') !== cat) return false;
+    if (verdict && r.verdict !== verdict) return false;
+    return true;
+  });
+  const by = {
+    value: (a, b) => b.implied_value_usd - a.implied_value_usd,
+    tvl: (a, b) => b.tvl_usd - a.tvl_usd,
+    growth: (a, b) => (b.change_7d ?? -1e9) - (a.change_7d ?? -1e9),
+    age: (a, b) => b.age_years - a.age_years,
+    name: (a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0),
+  };
+  out = [...out].sort(by[sort] || by.value);
+  return out;
+}
+
+function renderTable() {
+  const list = visibleRows();
+  const tbody = $('rows');
+  tbody.innerHTML = '';
+  for (const r of list) {
+    const tr = document.createElement('tr');
+    tr.dataset.slug = r.slug;
+    if (selectedSlug === r.slug) tr.classList.add('selected');
+    const growthClass = (r.change_7d ?? 0) >= 0 ? 'up' : 'down';
+    tr.innerHTML =
+      `<td class="num">${r.rank}</td>` +
+      `<td class="name"><b>${esc(r.name)}</b><span>${esc(r.slug)}</span></td>` +
+      `<td>${esc(r.category || '—')}</td>` +
+      `<td class="num">${r.chains.length}</td>` +
+      `<td class="num">${money(r.tvl_usd)}</td>` +
+      `<td class="num growth ${growthClass}">${pct(r.change_7d)}</td>` +
+      `<td class="num">${r.age_years.toFixed(1)}y</td>` +
+      `<td class="num"><b>${money(r.implied_value_usd)}</b></td>` +
+      `<td><span class="pill ${r.verdict.toLowerCase()}">${r.verdict}</span></td>`;
+    tr.addEventListener('click', () => showDetail(r.slug));
+    tbody.appendChild(tr);
   }
+  $('empty').hidden = list.length > 0;
+  $('count').textContent = `${list.length} of ${rows.length} protocols`;
+}
 
-  $('rows').addEventListener('click', function (e) {
-    var tr = e.target.closest('tr.row');
-    if (tr) showDetail(tr.getAttribute('data-slug'));
-  });
-  document.querySelectorAll('th[data-k]').forEach(function (th) {
-    th.addEventListener('click', function () {
-      var k = th.getAttribute('data-k');
-      sortKey = (k === 'value' || k === 'rank') ? 'rank' : k === 'tvl' ? 'tvl' : k === 'growth' ? 'growth' : k === 'age' ? 'age' : 'rank';
-      $('sort').value = sortKey;
-      render();
-    });
-  });
-  ['q', 'cat', 'chain', 'watch', 'sort'].forEach(function (id) {
-    $(id).addEventListener('input', function () { if (id === 'sort') sortKey = $('sort').value; render(); });
-  });
+let selectedSlug = null;
 
-  // Reference lists.
-  $('launched').innerHTML = D.launched.map(function (p) {
-    return '<li><b>' + p.name + '</b> <span>— ' + (p.symbol || '') + ' · ' + fmt$(p.mcap_usd) + ' market cap · ' + (p.category || '') + '</span></li>';
-  }).join('');
-  $('excluded').innerHTML = D.excluded_no_token.map(function (p) {
-    return '<li><b>' + p.name + '</b> <span>— ' + fmt$(p.tvl_usd) + ' TVL · set aside: ' + p.reason + '</span></li>';
-  }).join('');
+/** The detail panel for one protocol: its figures and its farm plan. */
+function showDetail(slug) {
+  const r = rows.find((row) => row.slug === slug);
+  const panel = $('detail');
+  if (!r) {
+    panel.innerHTML = '<p class="detail-hint">Select a row to see its farm plan.</p>';
+    selectedSlug = null;
+    return;
+  }
+  selectedSlug = slug;
+  for (const tr of document.querySelectorAll('#rows tr')) {
+    tr.classList.toggle('selected', tr.dataset.slug === slug);
+  }
+  const steps = r.farm_steps.map((s) => `<li>${esc(s)}</li>`).join('');
+  panel.innerHTML =
+    `<h2>${esc(r.name)}</h2>` +
+    `<p class="facts">` +
+    `<span>Rank <b>#${r.rank}</b></span>` +
+    `<span>Implied value <b>${money(r.implied_value_usd)}</b></span>` +
+    `<span>TVL <b>${money(r.tvl_usd)}</b></span>` +
+    `<span>7-day <b>${pct(r.change_7d)}</b></span>` +
+    `<span>Age with no token <b>${r.age_years.toFixed(1)} years</b></span>` +
+    `<span>Category <b>${esc(r.category || '—')}</b></span>` +
+    `<span>Chains <b>${esc(r.chains.join(', '))}</b></span>` +
+    `<span>Verdict <span class="pill ${r.verdict.toLowerCase()}">${r.verdict}</span></span>` +
+    `</p>` +
+    `<p>This protocol records no token. The implied value follows from the ` +
+    `formula in the method section below: its TVL, its seven-day change and the ` +
+    `years it has run with no token recorded.</p>` +
+    `<h3>Farm plan — what to do, what it costs, how long it takes</h3>` +
+    `<ol>${steps}</ol>`;
+  if (history.replaceState) history.replaceState(null, '', `#${slug}`);
+  panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
 
-  // URL params (used for the filtered / detail screenshots).
-  var params = new URLSearchParams(location.search);
-  if (params.get('q')) $('q').value = params.get('q');
-  if (params.get('category')) $('cat').value = params.get('category');
-  if (params.get('chain')) $('chain').value = params.get('chain');
-  if (params.get('watchlist') === '1') $('watch').checked = true;
-  if (params.get('sort')) { sortKey = params.get('sort'); $('sort').value = sortKey; }
-  render();
-  if (params.get('detail')) showDetail(params.get('detail'));
-  else if (rows.length) showDetail(rows[0].slug);
-})();
+/** Deep links: #slug opens a detail, ?verdict= / ?category= pre-filter. */
+function initFromUrl() {
+  const params = new URLSearchParams(location.search);
+  if (params.get('verdict')) $('verdict').value = params.get('verdict');
+  if (params.get('category')) $('category').value = params.get('category');
+  // The query values above change what the board shows, so render again
+  // with them applied before opening any deep-linked detail.
+  renderTable();
+  if (location.hash.length > 1) showDetail(decodeURIComponent(location.hash.slice(1)));
+}
+
+for (const id of ['q', 'category', 'verdict', 'sort']) {
+  $(id).addEventListener('input', renderTable);
+  $(id).addEventListener('change', renderTable);
+}
+window.addEventListener('hashchange', () => {
+  if (location.hash.length > 1) showDetail(decodeURIComponent(location.hash.slice(1)));
+});
+
+renderStats();
+renderCategories();
+renderTable();
+initFromUrl();
