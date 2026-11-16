@@ -1,118 +1,110 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Launch Radar — pre-token protocols ranked by implied launch value</title>
+<title>Token Radar — pre-token protocols priced off the tokens that already trade</title>
 <link rel="stylesheet" href="app.css">
 </head>
 <body>
 <header class="masthead">
-  <p class="eyebrow">Make.fun &middot; token-radar-01 &middot; sealed snapshot 13 Nov 2026</p>
-  <h1>Launch Radar</h1>
-  <p class="lede">Which pre-token protocol is worth farming next, and what to do about it.
-  Every protocol below records no token yet. Each is ranked by an implied launch
-  value worked out from the snapshot&rsquo;s own figures, and each carries a farm
-  plan that says what it costs and how long it takes &mdash; then a net verdict:
-  farm it, farm it thin, or skip it.</p>
-  <dl class="stats">
-    <div><dt>Protocols ranked</dt><dd id="stat-rows">&ndash;</dd></div>
-    <div><dt>Watchlist covered</dt><dd id="stat-watchlist">40 / 40</dd></div>
-    <div><dt>Verdict: farm</dt><dd id="stat-farm">&ndash;</dd></div>
-    <div><dt>Verdict: thin</dt><dd id="stat-thin">&ndash;</dd></div>
-    <div><dt>Verdict: skip</dt><dd id="stat-skip">&ndash;</dd></div>
-    <div><dt>Top implied value</dt><dd id="stat-top">&ndash;</dd></div>
-  </dl>
+  <div>
+    <h1>Token Radar</h1>
+    <p class="tagline">Which pre-token protocol is worth farming next — priced off the
+    tokens that already trade, not off a list of names.</p>
+  </div>
+  <dl class="headline-stats" id="headline-stats"></dl>
 </header>
 
+<main>
+  <section class="method" id="method" aria-label="How the board is priced">
+    <h2>How the board is priced</h2>
+    <p id="method-formula" class="formula"></p>
+    <div class="method-grid">
+      <div>
+        <h3>Size curve, fitted at run time</h3>
+        <p id="method-curve"></p>
+        <p id="method-blind"></p>
+      </div>
+      <div>
+        <h3>Category yardsticks</h3>
+        <p class="fine">Median market-cap / TVL among the cleaned comparables
+        (categories with at least 5 comps; the rest use the global median).</p>
+        <table class="yardsticks" id="yardsticks">
+          <thead><tr><th>Category</th><th>Multiple</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div>
+        <h3>Farm verdicts</h3>
+        <p id="method-verdicts"></p>
+        <p class="fine">Expected value is an illustrative farmer slice of 0.1%
+        of implied value, net of the farm's dollar fees. Implied value is this
+        entry's own claim from the snapshot's figures; it never predicts whether
+        or when a token launches. A protocol is said to record no token, never
+        to have none.</p>
+      </div>
+    </div>
+  </section>
 
+  <section class="controls" aria-label="Board controls">
+    <label>Search <input id="q" type="search" placeholder="name or slug" autocomplete="off"></label>
+    <label>Category
+      <select id="category"><option value="">All categories</option></select>
+    </label>
+    <label>Verdict
+      <select id="verdict">
+        <option value="">All verdicts</option>
+        <option>FARM</option>
+        <option>THIN</option>
+        <option>SKIP</option>
+      </select>
+    </label>
+    <label>Sort
+      <select id="sort">
+        <option value="implied">Implied value</option>
+        <option value="tvl">TVL</option>
+        <option value="change">7-day change</option>
+        <option value="age">Age without a token</option>
+        <option value="name">Name A-Z</option>
+      </select>
+    </label>
+    <label class="check"><input id="watchlist-only" type="checkbox"> Watchlist only</label>
+    <span class="count" id="count"></span>
+  </section>
 
-<section class="controls" aria-label="Filter and sort the board">
-  <label>Search <input id="q" type="search" placeholder="Protocol name or slug&hellip;" autocomplete="off"></label>
-  <label>Category
-    <select id="category"><option value="">All categories</option></select>
-  </label>
-  <label>Verdict
-    <select id="verdict">
-      <option value="">All verdicts</option>
-      <option value="FARM">FARM</option>
-      <option value="THIN">THIN</option>
-      <option value="SKIP">SKIP</option>
-    </select>
-  </label>
-  <label>Sort by
-    <select id="sort">
-      <option value="value">Implied value, highest first</option>
-      <option value="tvl">TVL, highest first</option>
-      <option value="growth">7-day change, highest first</option>
-      <option value="age">Age with no token, longest first</option>
-      <option value="name">Name, A to Z</option>
-    </select>
-  </label>
-  <p class="count" id="count"></p>
-</section>
+  <section class="detail" id="detail" aria-label="Protocol detail" hidden>
+    <button id="detail-close" type="button">Close detail</button>
+    <div id="detail-body"></div>
+  </section>
 
-<main class="board-wrap">
-  <table class="board">
-    <thead>
-      <tr>
-        <th class="num">#</th>
-        <th>Protocol</th>
-        <th>Category</th>
-        <th class="num">Chains</th>
-        <th class="num">TVL</th>
-        <th class="num">7-day</th>
-        <th class="num">Age</th>
-        <th class="num">Implied value</th>
-        <th>Verdict</th>
-      </tr>
-    </thead>
-    <tbody id="rows"></tbody>
-  </table>
-  <p class="empty" id="empty" hidden>No protocol matches this filter. Clear the search or pick another category.</p>
+  <section aria-label="Ranked board">
+    <table class="board" id="board">
+      <thead>
+        <tr>
+          <th class="num">#</th>
+          <th>Protocol</th>
+          <th>Category</th>
+          <th>Chains</th>
+          <th class="num">TVL</th>
+          <th class="num">7d</th>
+          <th class="num">Age</th>
+          <th class="num">Implied value</th>
+          <th>Verdict</th>
+          <th class="num">Farm cost</th>
+          <th class="num">Net</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </section>
 </main>
 
-<aside class="detail" id="detail" aria-label="Protocol detail">
-  <p class="detail-hint">Select a row to see its farm plan.</p>
-</aside>
-
-<section class="method" aria-label="How the value is worked out">
-  <h2>How the value is worked out</h2>
-  <p class="formula"><code id="formula">implied = 10.04 &times; TVL^0.80 &times; (1 + 1.5 &times; clamp(change_7d, &minus;50, +60) / 100) &times; (1 + 0.45 &times; min(age_years, 5))</code></p>
-  <p>The constant is not picked by hand. It is anchored to the market: the
-  comparables curve <code>log10(mcap) = 3.908 + 0.405 &times; log10(TVL)</code>,
-  fitted on the <span id="comps-n">94</span> trading protocols whose market cap is
-  comparable to their TVL (R&sup2; <span id="comps-r2">0.103</span>). The constant is
-  chosen so the model&rsquo;s median, at neutral growth and age, equals that
-  curve&rsquo;s median prediction over this board. The curve was also tested
-  blind: fitted on four fifths of the comparables and scored on the fifth
-  (<span id="comps-holdout">16</span> protocols), the median error was
-  &times;<span id="comps-factor">3.40</span> &mdash; wide, and stated as wide, which
-  is why the curve anchors the scale and the power law carries the ranking.</p>
-  <p>Growth is linear and clamped, so one wild week cannot crown a protocol on
-  its own. Age is the years since DefiLlama began tracking the protocol with no
-  token recorded, capped at five. The board holds only genuine launch
-  candidates: pre-token, and not a wrapped, staked or bridged product of a token
-  that already trades, not an exchange, and not a versioned copy &mdash; the
-  watchlist&rsquo;s own rule, without its $50M floor, so early protocols below
-  the floor are found too. Protocols whose token already trades are used only
-  to fit the curve; they are not ranked here.</p>
-  <p class="verdict-rule"><strong>Verdict rule.</strong>
-  <span class="pill farm">FARM</span> implied value at least $50M and 7-day TVL
-  change at least &minus;10%. <span class="pill thin">THIN</span> implied value at
-  least $10M and change at least &minus;30%. <span class="pill skip">SKIP</span>
-  anything else: the farm costs more in time than it is likely to return.</p>
-</section>
-
-<footer class="foot">
-  <p>Implied value is this entry&rsquo;s own claim from the snapshot&rsquo;s figures.
-  It never predicts whether or when a token launches. A protocol is said to
-  record no token, never to have none: its DefiLlama record may simply not
-  carry one. Farm plans are a reader&rsquo;s starting point, not financial
-  advice; check the protocol yourself before you put money in.</p>
-  <p>Built for the make.fun bounty &ldquo;Build the best token launch radar&rdquo;:
-  make.fun/bounty/token-radar-01 &middot; snapshot as of 2026-11-13, floor $50M,
-  758 protocols, 40 on the watchlist.</p>
+<footer>
+  <p>Snapshot as of <span id="as-of"></span> · floor $50,000,000 · every row is a
+  protocol that records no token and is not a wrapped, staked or bridged product
+  of one that trades. Built from the sealed snapshot alone; nothing here is
+  fetched from the network.</p>
 </footer>
 
 <script src="../data.js"></script>
