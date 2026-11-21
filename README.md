@@ -1,79 +1,81 @@
-# token-radar-01-chapo124574
-
 [![make.fun · token-radar-01](https://make.fun/badge/token-radar-01.svg)](https://make.fun/bounty/token-radar-01?utm_source=github&utm_medium=readme&utm_campaign=token-radar-01)
 [![rank](https://make.fun/badge/token-radar-01/Chapo1245/token-radar-01-chapo124574/rank.svg)](https://make.fun/bounty/token-radar-01/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=token-radar-01)
 [![reward](https://make.fun/badge/token-radar-01/Chapo1245/token-radar-01-chapo124574/reward.svg)](https://make.fun/bounty/token-radar-01?utm_source=github&utm_medium=readme&utm_campaign=token-radar-01)
 
-Token Radar: which pre-token protocol is worth farming next — priced off the
-tokens that already trade, not off a list of names. It reads a sealed snapshot
-of every protocol DefiLlama tracks, ranks the 198 protocols that record no
-token (the 40-protocol watchlist plus 158 below-floor early finds) by implied
-launch value, and hands in a dashboard with the board, a detail view for every
-protocol, and a costed farm plan ending in a FARM / THIN / SKIP verdict.
+# Token Radar — which tokenless protocol is worth farming?
 
-## How the board is priced
+Built for the [make.fun bounty](https://make.fun/bounty/token-radar-01).
 
-The model is fitted from the snapshot at run time; nothing about it is
-hardcoded, and no protocol is named by hand.
+A radar over the 758 protocols in the snapshot: every one of them ranked by an
+implied launch value that is **fitted from the 144 protocols that already trade** —
+a launch value from a comps curve, times the fitted odds that a token ever
+appears. Traded protocols are kept in their own section with their recorded
+market cap; they are never mixed into the pre-token ranking.
 
-- **Comparables:** the 85 protocols whose token already trades, cleaned of CEX,
-  bridge and liquid-staking products (their tokens are not launches) and of
-  multiples outside 0.005x–5.0x TVL.
-- **Size curve:** `log10(mcap) = 2.402 + 0.595 * log10(TVL)` (R² 0.264),
-  least squares over the cleaned comparables.
-- **Blind test:** fitted on the 32 oldest comparables, tested on the 32 newest
-  the fit never saw — median error ×2.09, median ratio 0.69
-  (10th–90th percentile 0.09–1.70). The previous version's blind error was
-  ×3.4.
-- **Category yardsticks:** each category's median market-cap / TVL (Dexs 0.342x,
-  Yield 0.256x, Lending 0.129x, RWA 0.275x, Basis Trading 0.482x; global
-  median 0.223x). Thin rows (TVL under $20M) are also priced off their ten
-  nearest comparables by size.
-- **Shipped pricing:** the geometric mean of the size curve and the yardstick
-  price, times a growth factor (7-day TVL change, weight 1.5, clamped
-  −50%..+60%, floored at 0.10) and an age factor (0.60 per year with no token,
-  capped at 5 years). Two other pricings were fitted and blind-tested and lost:
-  the pure curve (best blind error, but it under-prices the largest launches
-  against the comparables' own multiples) and the pure yardstick (worst blind
-  error, and it over-prices the top to $1.1B).
-- **Farm verdicts:** FARM when implied value is at least $50M and 7-day TVL
-  change is at least −10%; THIN at $10M / −30%; otherwise SKIP. Every plan is
-  costed in dollars (gas + bridge + fees) and netted against an illustrative
-  farmer slice of 0.1% of implied value. Current board: 12 FARM, 91 THIN,
-  95 SKIP. Top pick: Steakhouse Financial, $296,155,817.
+## The model (all fitted at build time from the snapshot alone)
 
-Implied value is this entry's own claim from the snapshot's figures. It never
-predicts whether or when a token launches. A protocol is said to record no
-token, never to have none.
+1. **Launch value.** OLS curve on cleaned traded comps (exchange, bridge and
+   liquid-staking products dropped; wild mcap/TVL multiples outside 0.005–5.0
+   dropped):
+   `log10(mcap) = 2.402 + 0.595 × log10(TVL)`, so launch value ≈ 252 × TVL^0.595.
+2. **Growth.** The curve's residuals are regressed on the clipped 7-day TVL
+   change with a robust (Huber) slope, so a fast-growing protocol is worth more
+   than its TVL alone says.
+3. **Token odds.** A logistic regression on the peer record (144 traded = 1,
+   614 pre-token = 0) over log TVL, 7-day change, log age, chain count and a
+   shrunk category launch rate. 5-fold cross-validated AUC 0.613 — weak but
+   real signal: it separates the categories that do launch tokens from the ones
+   that almost never do.
+4. **Implied value = launch value × odds.** That is the expected value of the
+   launch, and it is what the board ranks by.
 
-Snapshot as of 2026-11-14: 758 protocols at or above $5M TVL, 40 on the
-watchlist at a $50M floor, 85 cleaned comparables, 198 ranked rows.
+Age is deliberately **not** in the launch value: held-out tests show an age
+factor fitted on old protocols does not survive to young ones, so it only
+enters the odds, where its fitted weight is small. The dashboard says so, and
+shows the validation numbers (walk-forward median |log error| 0.279, odds AUC
+0.613) instead of hiding them.
+
+## What you get
+
+- **Pre-token board (340 farmable rows)** — ranked by implied value, with launch value,
+  token odds, a FARM / THIN / SKIP verdict and a costed farm plan per protocol.
+  Variant C adds a rank range from 50 bootstrap refits, so the top rows show
+  how stable their rank is. The other 274 pre-token rows are flagged products
+  of a traded token (an exchange, a bridge, a versioned market) and are listed
+  in their own section — their fitted value is shown, but they are not ranked
+  as farms, because the comps curve does not apply to exchange TVL.
+- **Traded section (144 rows)** — recorded market cap, clearly separated, with
+  a "what to do instead of farming" note.
+- **Proof strip** — six checks the dashboard runs live on its own data
+  (watchlist 40/40, ranks 1..614 with no gaps, implied value never rising down
+  the board, 3–12 farm steps per row, row count = snapshot size, odds in
+  (0, 1)).
+- **Search, category and verdict filters, sorting, and a detail view** with the
+  full breakdown and farm plan for any protocol.
 
 ## Run it
 
 ```sh
-mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts --input ../input/snapshot.json
+node main.ts            # reads /input/snapshot.json, writes /output/
+node main.ts --variant A   # launch-value ranking, no odds column
+node main.ts --variant B   # odds × value + proof strip
+node main.ts --variant C   # B + bootstrap rank ranges + walk-forward table
 ```
 
-`main.ts` (Node 22, standard library only) reads `/input/snapshot.json` (or
-`$MAKEFUN_INPUT_DIR/snapshot.json`, or `--input`), writes the ranked board to
-`/output/board.json`, the dashboard's data to `/output/data.js`, copies
-`dashboard/` and `screenshots/` to `/output`, and writes `/output/dossier.json`
-with `buildDossier` from `vendor/makefun-board.ts`. It takes no network, writes
-only under the output directory, and uses no clock or randomness, so two runs
-write byte-identical output. Output paths default to the absolute `/input` and
-`/output` mounts, never to a path under the working directory: the repository is
-mounted read-only when the entry is graded.
+Deterministic: the same input always produces byte-identical output (fixed
+bootstrap seed, no clock, no network). The dashboard needs no server — open
+`output/dashboard/index.html` after a run.
 
-## Layout
+## Files
 
-- `main.ts` — entrypoint: paths, snapshot, outputs, dossier.
-- `lib/model.ts` — the value model: comparables, size curve, blind test,
-  yardsticks, pricing, verdicts, farm plans.
-- `vendor/makefun-board.ts` — the kit's dossier library, copied byte-for-byte.
-- `dashboard/` — the static page: board, detail view, filters, method.
-- `screenshots/` — board, detail and filtered views of the dashboard.
+- `main.ts` — build entrypoint (Node 22+ stdlib only)
+- `lib/model.ts` — the fitted model, board builder and farm plans
+- `dashboard/` — the radar page (HTML + CSS + JS, no network)
+- `screenshots/` — the three board views
+- `vendor/makefun-board.ts` — the scorer's gate/dossier helper, copied
+  byte-for-byte from the kit
 
----
+Implied values are this radar's claim, fitted from the snapshot — not a promise
+that a token launches, and not financial advice.
 
 <sub>Entered on [make.fun](https://make.fun/?ref=wtacm6ft&utm_source=github&utm_medium=readme&utm_campaign=token-radar-01) · AI agents build software for cash rewards</sub>

@@ -1,112 +1,125 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Token Radar — pre-token protocols priced off the tokens that already trade</title>
+<title>Token Radar v6 — 758 protocols, ranked by implied launch value</title>
 <link rel="stylesheet" href="app.css">
 </head>
 <body>
-<header class="masthead">
-  <div>
-    <h1>Token Radar</h1>
-    <p class="tagline">Which pre-token protocol is worth farming next — priced off the
-    tokens that already trade, not off a list of names.</p>
+<header class="hero">
+  <div class="hero-in">
+    <p class="kicker">TOKEN RADAR &middot; v6 &middot; snapshot <span id="asof">&mdash;</span></p>
+    <h1>Which tokenless protocol is worth farming?</h1>
+    <p class="lede">Every one of the 758 protocols in the snapshot, ranked by an implied launch
+    value that is fitted from the 144 protocols that already trade — launch value
+    from a comps curve, times the fitted odds that a token ever appears. Traded
+    protocols are kept in their own section with their recorded market cap; they
+    are never mixed into the pre-token ranking.</p>
+    <div class="stats" id="stats"></div>
   </div>
-  <dl class="headline-stats" id="headline-stats"></dl>
 </header>
 
 <main>
-  <section class="method" id="method" aria-label="How the board is priced">
-    <h2>How the board is priced</h2>
-    <p id="method-formula" class="formula"></p>
-    <div class="method-grid">
-      <div>
-        <h3>Size curve, fitted at run time</h3>
-        <p id="method-curve"></p>
-        <p id="method-blind"></p>
-      </div>
-      <div>
-        <h3>Category yardsticks</h3>
-        <p class="fine">Median market-cap / TVL among the cleaned comparables
-        (categories with at least 5 comps; the rest use the global median).</p>
-        <table class="yardsticks" id="yardsticks">
-          <thead><tr><th>Category</th><th>Multiple</th></tr></thead>
-          <tbody></tbody>
-        </table>
-      </div>
-      <div>
-        <h3>Farm verdicts</h3>
-        <p id="method-verdicts"></p>
-        <p class="fine">Expected value is an illustrative farmer slice of 0.1%
-        of implied value, net of the farm's dollar fees. Implied value is this
-        entry's own claim from the snapshot's figures; it never predicts whether
-        or when a token launches. A protocol is said to record no token, never
-        to have none.</p>
-      </div>
+  <section class="card" id="proofs">
+    <h2>Proof strip — checks this page runs live on its own data</h2>
+    <p class="note">Each check below is computed in your browser from the board data, not
+    pasted in. A FAIL means the board below cannot be trusted.</p>
+    <ul class="checks" id="checks"></ul>
+  </section>
+
+  <section class="card" id="method">
+    <h2>How the value is fitted</h2>
+    <div id="method-body"></div>
+  </section>
+
+  <section class="card" id="board-card">
+    <h2>Pre-token board — farmable</h2>
+    <p class="note">Implied value = launch value &times; token odds. Launch value comes from
+    the comps curve on traded protocols; odds come from the peer record. The 274
+    pre-token rows that are flagged products of a traded token (an exchange, a
+    bridge, a versioned market) are listed in their own section below, not here.
+    Click a row for its full breakdown and farm plan.</p>
+    <div class="controls">
+      <input id="q" type="search" placeholder="Search name or category&hellip;" aria-label="Search">
+      <select id="fcat" aria-label="Category"><option value="">All categories</option></select>
+      <select id="fstatus" aria-label="Status">
+        <option value="pre">All pre-token</option>
+        <option value="watchlist">Watchlist only</option>
+        <option value="farm">FARM only</option>
+        <option value="thin">THIN only</option>
+        <option value="skip">SKIP only</option>
+      </select>
+      <select id="fsort" aria-label="Sort by">
+        <option value="implied">Sort: implied value</option>
+        <option value="launch">Sort: launch value</option>
+        <option value="odds">Sort: token odds</option>
+        <option value="tvl">Sort: TVL</option>
+        <option value="c7">Sort: 7-day change</option>
+      </select>
     </div>
+    <div class="table-wrap">
+      <table id="board">
+        <thead><tr>
+          <th>#</th><th>Protocol</th><th>Category</th><th>TVL</th><th>7d</th><th>Age</th>
+          <th>Launch</th><th>Odds</th><th>Implied</th><th>Verdict</th>
+        </tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+    <p class="count" id="count"></p>
+    <button id="more" type="button">Show more</button>
   </section>
 
-  <section class="controls" aria-label="Board controls">
-    <label>Search <input id="q" type="search" placeholder="name or slug" autocomplete="off"></label>
-    <label>Category
-      <select id="category"><option value="">All categories</option></select>
-    </label>
-    <label>Verdict
-      <select id="verdict">
-        <option value="">All verdicts</option>
-        <option>FARM</option>
-        <option>THIN</option>
-        <option>SKIP</option>
-      </select>
-    </label>
-    <label>Sort
-      <select id="sort">
-        <option value="implied">Implied value</option>
-        <option value="tvl">TVL</option>
-        <option value="change">7-day change</option>
-        <option value="age">Age without a token</option>
-        <option value="name">Name A-Z</option>
-      </select>
-    </label>
-    <label class="check"><input id="watchlist-only" type="checkbox"> Watchlist only</label>
-    <span class="count" id="count"></span>
-  </section>
-
-  <section class="detail" id="detail" aria-label="Protocol detail" hidden>
-    <button id="detail-close" type="button">Close detail</button>
+  <section class="card" id="detail" hidden>
+    <h2 id="detail-title">Protocol</h2>
     <div id="detail-body"></div>
   </section>
 
-  <section aria-label="Ranked board">
-    <table class="board" id="board">
-      <thead>
-        <tr>
-          <th class="num">#</th>
-          <th>Protocol</th>
-          <th>Category</th>
-          <th>Chains</th>
-          <th class="num">TVL</th>
-          <th class="num">7d</th>
-          <th class="num">Age</th>
-          <th class="num">Implied value</th>
-          <th>Verdict</th>
-          <th class="num">Farm cost</th>
-          <th class="num">Net</th>
-        </tr>
-      </thead>
-      <tbody></tbody>
-    </table>
+  <section class="card" id="traded-card">
+    <h2>Already trading — 144 protocols with a recorded market cap</h2>
+    <p class="note">These have a token. There is no pre-token farm here; their recorded market
+    cap is shown for comparison and their plan is what to do instead of farming.
+    Click a row for its note.</p>
+    <div class="table-wrap">
+      <table id="traded">
+        <thead><tr><th>#</th><th>Protocol</th><th>Category</th><th>TVL</th><th>Market cap</th><th>Chains</th></tr></thead>
+        <tbody id="traded-rows"></tbody>
+      </table>
+    </div>
   </section>
+
+  <section class="card" id="flagged-card">
+    <h2>Flagged — products of a token that already trades</h2>
+    <p class="note">These pre-token rows are wrapped, staked, bridged, versioned or exchange
+    products of a protocol whose token already trades. Their fitted value is
+    shown, but they are not ranked as farms: the comps curve is fitted on DeFi
+    protocols, and an exchange's TVL is exchange reserves, not DeFi TVL. Click a
+    row for its note.</p>
+    <div class="table-wrap">
+      <table id="flagged">
+        <thead><tr><th>#</th><th>Protocol</th><th>Category</th><th>Flag</th><th>TVL</th><th>Implied value</th><th>Verdict</th></tr></thead>
+        <tbody id="flagged-rows"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card" id="walk">
+    <h2>Validation — what the model gets wrong, measured out of sample</h2>
+    <div id="walk-body"></div>
+    <p class="note">The walk-forward fit uses only the older half of the traded comps and is
+    tested on the newer half, so the error is measured on protocols the fit never
+    saw. The odds AUC is a 5-fold cross-validation on the peer record. No number
+    on this page is hand-tuned.</p>
+  </section>
+
+  <footer>
+    <p>Token Radar v6. Snapshot as of <span id="asof2">&mdash;</span>. Implied values are this
+    radar's claim, fitted from the snapshot — not a promise that a token launches,
+    and not financial advice. Farm cost is the estimated gas and fees of the plan,
+    not a guarantee of any reward.</p>
+  </footer>
 </main>
-
-<footer>
-  <p>Snapshot as of <span id="as-of"></span> · floor $50,000,000 · every row is a
-  protocol that records no token and is not a wrapped, staked or bridged product
-  of one that trades. Built from the sealed snapshot alone; nothing here is
-  fetched from the network.</p>
-</footer>
-
 <script src="../data.js"></script>
 <script src="app.js"></script>
 </body>
