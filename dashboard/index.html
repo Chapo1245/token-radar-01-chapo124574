@@ -1,15 +1,85 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Token Radar v8 — pre-token protocols ranked by launch x odds x share</title>
+<title>Token Radar v9 — which pre-token protocol is worth farming next</title>
 <link rel="stylesheet" href="app.css">
 </head>
 <body>
-<a class="skip" href="#board">Skip to the board</a>
-<main id="board" tabindex="-1" aria-busy="true"></main>
-<noscript><p class="noscript">Token Radar needs JavaScript: the board is computed from the snapshot and rendered here.</p></noscript>
+<header class="top">
+  <div>
+    <h1>Token Radar <span class="v9">v9</span></h1>
+    <p class="sub">Every protocol DefiLlama tracks, ranked by what its token launch would be worth — fitted from the snapshot's own figures, not a list of names.</p>
+    <p class="meta" id="meta">Loading…</p>
+  </div>
+  <div class="howto">
+    <strong>How to read it</strong>
+    <ol>
+      <li>Pick a row with a big implied value and a tight 90% interval.</li>
+      <li>Open it: the detail view shows launch × odds × share and the farm plan.</li>
+      <li>Farm the plan at your deposit size ($50 / $250 / $1,000).</li>
+    </ol>
+  </div>
+</header>
+
+<section class="kpis" id="kpis" aria-label="Board totals"></section>
+<section class="checks" id="checks" aria-label="Live self-checks"></section>
+
+<section class="controls">
+  <label>Search <input id="q" type="search" placeholder="protocol or slug…" autocomplete="off"></label>
+  <label>Category <select id="cat"><option value="">All categories</option></select></label>
+  <label>Sort by
+    <select id="sort">
+      <option value="implied">Implied value</option>
+      <option value="odds">Token odds</option>
+      <option value="launch">Launch value</option>
+      <option value="tvl">TVL</option>
+      <option value="growth">7-day growth</option>
+    </select>
+  </label>
+  <label class="chk"><input id="watchonly" type="checkbox"> Watchlist only (40)</label>
+  <span class="count" id="count"></span>
+</section>
+
+<main>
+  <h2>Ranked board — pre-token protocols by implied launch value</h2>
+  <p class="note">Implied value = launch × odds × share. Launch is the fitted curve's value for the token at listing; odds is the fitted chance a token ever lists; share is the category's own-token share of that value. The 90% interval is conformal, per category. Ranks in brackets are the bootstrap rank range over 50 refits. Rows marked “token recorded” carry a token id in the snapshot but no market cap — ranked on the same curve, flagged rather than presented as having no token.</p>
+  <div class="tablewrap">
+  <table id="board">
+    <thead><tr>
+      <th>#</th><th>Protocol</th><th>Category</th><th>Chains</th>
+      <th class="num">TVL</th><th class="num">7d</th><th class="num">Age</th>
+      <th class="num">Launch</th><th class="num">Odds</th><th class="num">Share</th>
+      <th class="num">Implied value</th><th class="num">90% interval</th>
+    </tr></thead>
+    <tbody id="rows"></tbody>
+  </table>
+  </div>
+
+  <h2>The value model — fitted, tested held-out, every term</h2>
+  <div id="model"></div>
+
+  <h2>Live tokens — the market's own values, kept apart</h2>
+  <p class="note">These protocols already trade. The board never mixes their market caps into the launch ranking; they are the anchors the launch curve was fitted on.</p>
+  <div class="tablewrap">
+  <table id="live">
+    <thead><tr><th>Protocol</th><th>Category</th><th class="num">TVL</th><th class="num">Market cap</th><th class="num">7d</th></tr></thead>
+    <tbody id="liverows"></tbody>
+  </table>
+  </div>
+  <p class="note" id="setaside"></p>
+</main>
+
+<dialog id="detail">
+  <div class="dlg-head"><h3 id="dname"></h3><button id="dclose" type="button">Close</button></div>
+  <div id="dbody"></div>
+</dialog>
+
+<footer>
+  <p>Token Radar v9. Data: the sealed snapshot (DefiLlama protocols, fetched once). A protocol is shown as recording no token, never as having none. Implied values are this radar's own claims, fitted from the snapshot — not prices, not promises.</p>
+  <p class="tiny">Built as a program: main.ts reads the snapshot and writes this page's data. No network, no tracking.</p>
+</footer>
 <script src="../data.js"></script>
 <script src="app.js"></script>
 </body>
