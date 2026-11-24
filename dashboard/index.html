@@ -1,112 +1,14 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Token Radar — pre-token protocols priced off the tokens that already trade</title>
+<title>Token Radar v7 — pre-token protocols ranked by implied value</title>
 <link rel="stylesheet" href="app.css">
 </head>
 <body>
-<header class="masthead">
-  <div>
-    <h1>Token Radar</h1>
-    <p class="tagline">Which pre-token protocol is worth farming next — priced off the
-    tokens that already trade, not off a list of names.</p>
-  </div>
-  <dl class="headline-stats" id="headline-stats"></dl>
-</header>
-
-<main>
-  <section class="method" id="method" aria-label="How the board is priced">
-    <h2>How the board is priced</h2>
-    <p id="method-formula" class="formula"></p>
-    <div class="method-grid">
-      <div>
-        <h3>Size curve, fitted at run time</h3>
-        <p id="method-curve"></p>
-        <p id="method-blind"></p>
-      </div>
-      <div>
-        <h3>Category yardsticks</h3>
-        <p class="fine">Median market-cap / TVL among the cleaned comparables
-        (categories with at least 5 comps; the rest use the global median).</p>
-        <table class="yardsticks" id="yardsticks">
-          <thead><tr><th>Category</th><th>Multiple</th></tr></thead>
-          <tbody></tbody>
-        </table>
-      </div>
-      <div>
-        <h3>Farm verdicts</h3>
-        <p id="method-verdicts"></p>
-        <p class="fine">Expected value is an illustrative farmer slice of 0.1%
-        of implied value, net of the farm's dollar fees. Implied value is this
-        entry's own claim from the snapshot's figures; it never predicts whether
-        or when a token launches. A protocol is said to record no token, never
-        to have none.</p>
-      </div>
-    </div>
-  </section>
-
-  <section class="controls" aria-label="Board controls">
-    <label>Search <input id="q" type="search" placeholder="name or slug" autocomplete="off"></label>
-    <label>Category
-      <select id="category"><option value="">All categories</option></select>
-    </label>
-    <label>Verdict
-      <select id="verdict">
-        <option value="">All verdicts</option>
-        <option>FARM</option>
-        <option>THIN</option>
-        <option>SKIP</option>
-      </select>
-    </label>
-    <label>Sort
-      <select id="sort">
-        <option value="implied">Implied value</option>
-        <option value="tvl">TVL</option>
-        <option value="change">7-day change</option>
-        <option value="age">Age without a token</option>
-        <option value="name">Name A-Z</option>
-      </select>
-    </label>
-    <label class="check"><input id="watchlist-only" type="checkbox"> Watchlist only</label>
-    <span class="count" id="count"></span>
-  </section>
-
-  <section class="detail" id="detail" aria-label="Protocol detail" hidden>
-    <button id="detail-close" type="button">Close detail</button>
-    <div id="detail-body"></div>
-  </section>
-
-  <section aria-label="Ranked board">
-    <table class="board" id="board">
-      <thead>
-        <tr>
-          <th class="num">#</th>
-          <th>Protocol</th>
-          <th>Category</th>
-          <th>Chains</th>
-          <th class="num">TVL</th>
-          <th class="num">7d</th>
-          <th class="num">Age</th>
-          <th class="num">Implied value</th>
-          <th>Verdict</th>
-          <th class="num">Farm cost</th>
-          <th class="num">Net</th>
-        </tr>
-      </thead>
-      <tbody></tbody>
-    </table>
-  </section>
-</main>
-
-<footer>
-  <p>Snapshot as of <span id="as-of"></span> · floor $50,000,000 · every row is a
-  protocol that records no token and is not a wrapped, staked or bridged product
-  of one that trades. Built from the sealed snapshot alone; nothing here is
-  fetched from the network.</p>
-</footer>
-
+<a class="skip" href="#board">Skip to the board</a>
+<main id="board" tabindex="-1" aria-busy="true"></main>
 <script src="../data.js"></script>
 <script src="app.js"></script>
 </body>
